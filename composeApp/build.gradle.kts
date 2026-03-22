@@ -16,11 +16,9 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.ui)
             implementation(compose.components.resources)
-            implementation(compose.uiToolingPreview)
-            implementation(libs.androidx.lifecycle.viewmodelCompose)
-            implementation(libs.androidx.lifecycle.runtimeCompose)
-            implementation(projects.shared)
+            implementation(compose.components.uiToolingPreview)
         }
+
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }

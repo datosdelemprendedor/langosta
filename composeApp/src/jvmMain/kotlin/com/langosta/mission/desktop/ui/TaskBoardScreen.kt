@@ -9,10 +9,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.langosta.mission.desktop.TaskViewModel
-import com.langosta.mission.domain.model.TaskStatus
 
 @Composable
-fun TaskBoardScreen(viewModel: TaskViewModel) {
+fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -21,7 +20,7 @@ fun TaskBoardScreen(viewModel: TaskViewModel) {
         viewModel.fetchTasks()
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,

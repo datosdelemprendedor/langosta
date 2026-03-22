@@ -1,7 +1,7 @@
 package com.langosta.mission.data.api
 
-import com.langosta.mission.data.api.dto.AgentDto
-import com.langosta.mission.data.api.dto.TaskDto
+import com.langosta.mission.domain.model.Agent
+import com.langosta.mission.domain.model.Task
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -17,18 +17,18 @@ class OpenClawClient(private val baseUrl: String) {
         }
     }
 
-    suspend fun getAgents(): List<AgentDto> =
+    suspend fun getAgents(): List<Agent> =
         client.get("$baseUrl/agents").body()
 
-    suspend fun getTasks(): List<TaskDto> =
+    suspend fun getTasks(): List<Task> =
         client.get("$baseUrl/tasks").body()
 
-    suspend fun createTask(task: TaskDto): TaskDto =
+    suspend fun createTask(task: Task): Task =
         client.post("$baseUrl/tasks") {
             setBody(task)
         }.body()
 
-    suspend fun updateTaskStatus(taskId: String, status: String): TaskDto =
+    suspend fun updateTaskStatus(taskId: String, status: String): Task =
         client.patch("$baseUrl/tasks/$taskId/status") {
             setBody(mapOf("status" to status))
         }.body()

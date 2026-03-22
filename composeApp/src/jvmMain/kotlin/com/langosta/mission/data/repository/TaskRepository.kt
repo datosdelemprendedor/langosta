@@ -14,20 +14,7 @@ class TaskRepository(
     val tasks: StateFlow<List<Task>> = db.tasks
 
     suspend fun fetchTasks() {
-        val dtos = client.getTasks()
-        val tasks = dtos.map { dto ->
-            Task(
-                id = dto.id,
-                title = dto.title,
-                description = dto.description,
-                status = TaskStatus.valueOf(dto.status),
-                assignedAgentId = dto.assignedAgentId,
-                createdAt = dto.createdAt,
-                updatedAt = dto.updatedAt,
-                result = dto.result,
-                errorMessage = dto.errorMessage
-            )
-        }
+        val tasks = client.getTasks()
         db.saveTasks(tasks)
     }
 

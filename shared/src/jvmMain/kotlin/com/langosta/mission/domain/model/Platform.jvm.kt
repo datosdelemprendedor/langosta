@@ -1,4 +1,4 @@
-package com.langosta.mission.domain.model
+package com.langosta
 
 class JVMPlatform : Platform {
     override val name: String = "Java ${System.getProperty("java.version")}"

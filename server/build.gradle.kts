@@ -18,6 +18,7 @@ dependencies {
     implementation(libs.logback.classic)
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
+    implementation(project(":composeApp"))
     testImplementation(libs.ktor.server.testHost)
     testImplementation(libs.kotlin.testJunit)
 }

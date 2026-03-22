@@ -1,13 +1,13 @@
 package com.langosta.mission.web
 
-import com.langosta.mission.data.api.dto.AgentDto
+import com.langosta.mission.domain.model.Agent
 import io.ktor.http.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.util.UUID
 
-private val agents = mutableListOf<AgentDto>()
+private val agents = mutableListOf<Agent>()
 
 fun Routing.agentRoutes() {
 
@@ -18,7 +18,7 @@ fun Routing.agentRoutes() {
         }
 
         post {
-            val agent = call.receive<AgentDto>()
+            val agent = call.receive<Agent>()
             val newAgent = agent.copy(
                 id = UUID.randomUUID().toString(),
                 lastSeen = System.currentTimeMillis()

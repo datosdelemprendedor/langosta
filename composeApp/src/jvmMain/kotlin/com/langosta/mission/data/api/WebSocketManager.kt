@@ -5,6 +5,7 @@ import io.ktor.client.plugins.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlin.text.iterator
 
 class WebSocketManager(private val baseUrl: String) {
 

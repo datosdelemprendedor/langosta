@@ -3,6 +3,7 @@ package com.langosta.mission.desktop
 import com.langosta.mission.data.TaskHistoryDatabase
 import com.langosta.mission.data.TaskHistoryEntry
 import com.langosta.mission.data.api.OpenClawClient
+import com.langosta.mission.data.api.OpenClawGatewayClient
 import com.langosta.mission.data.repository.TaskRepository
 import com.langosta.mission.domain.model.Agent
 import com.langosta.mission.domain.model.Task
@@ -112,17 +113,25 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
-    // Enviar mensaje al agente principal de OpenCLAW
+    // Crear tarea en OpenClaw via CLI
     fun createTask(title: String, description: String, agentId: String?) {
         scope.launch {
             try {
-                val client = OpenClawClient(ConfigManager.getServerUrl())
                 val targetAgent = agentId ?: _agents.value.firstOrNull()?.id ?: "main"
-                client.sendMessage(targetAgent, "$title\n$description")
-                NotificationManager.success("Mensaje enviado", title)
+                val fullTask = "Tarea: $title\nDescripción: $description"
+                
+                AppLogger.i("TaskViewModel", "Creating task via CLI for agent: $targetAgent")
+                
+                val gatewayClient = OpenClawGatewayClient()
+                val response = gatewayClient.sendMessage(targetAgent, fullTask)
+                
+                AppLogger.i("TaskViewModel", "Task response: $response")
+                NotificationManager.success("Tarea creada", "Agent: $targetAgent")
+                
             } catch (e: Exception) {
-                _error.value = e.message
-                AppLogger.e("TaskViewModel", "Error sending message", e)
+                AppLogger.e("TaskViewModel", "Error creating task: ${e.message}", e)
+                _error.value = "Error: ${e.message}"
+                NotificationManager.error("Error", e.message ?: "Unknown error")
             }
         }
     }

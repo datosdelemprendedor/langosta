@@ -1,6 +1,7 @@
 package com.langosta.mission.desktop
 
 import com.langosta.mission.data.api.OpenClawClient
+import com.langosta.mission.data.api.OpenClawGatewayClient
 import com.langosta.mission.data.api.WebSocketManager
 import com.langosta.mission.data.repository.DashboardRepository
 import com.langosta.mission.util.AppLogger
@@ -25,12 +26,20 @@ class DashboardViewModel {
     private val _incidentEvents = MutableStateFlow<List<String>>(emptyList())
     val incidentEvents = _incidentEvents.asStateFlow()
 
-    private val wsManager = WebSocketManager(
-        ConfigManager.getServerUrl().removePrefix("http://")
-    )
+    private val _wsConnectionState = MutableStateFlow<String>("Disconnected")
+    val wsConnectionState = _wsConnectionState.asStateFlow()
+
+    private val baseUrl = ConfigManager.getServerUrl().removePrefix("http://")
+
+    private val wsManager = WebSocketManager(baseUrl)
+
+    private val gatewayClient = OpenClawGatewayClient()
 
     private fun buildRepository(): DashboardRepository =
-        DashboardRepository(OpenClawClient(ConfigManager.getServerUrl()))
+        DashboardRepository(
+            httpClient = OpenClawClient(ConfigManager.getServerUrl()),
+            gatewayClient = gatewayClient
+        )
 
     fun startPolling() {
         scope.launch {
@@ -48,7 +57,6 @@ class DashboardViewModel {
     }
 
     fun startIncidentStream() {
-        // Conectar WebSocket
         scope.launch {
             try {
                 wsManager.connectWithRetry()
@@ -56,7 +64,26 @@ class DashboardViewModel {
                 AppLogger.e("DashboardViewModel", "WebSocket error", e)
             }
         }
-        // Consumir eventos
+
+        scope.launch {
+            wsManager.connectionState.collect { state ->
+                when (state) {
+                    is WebSocketManager.ConnectionState.Disconnected -> {
+                        _wsConnectionState.value = "Disconnected (REST polling)"
+                    }
+                    is WebSocketManager.ConnectionState.Connecting -> {
+                        _wsConnectionState.value = "Connecting..."
+                    }
+                    is WebSocketManager.ConnectionState.Connected -> {
+                        _wsConnectionState.value = "Connected"
+                    }
+                    is WebSocketManager.ConnectionState.Error -> {
+                        _wsConnectionState.value = "Error: ${state.message}"
+                    }
+                }
+            }
+        }
+
         scope.launch {
             wsManager.events.collect { event ->
                 val current = _incidentEvents.value.toMutableList()

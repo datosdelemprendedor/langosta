@@ -20,6 +20,7 @@ fun DashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val incidentEvents by viewModel.incidentEvents.collectAsState()
+    val wsConnectionState by viewModel.wsConnectionState.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.startPolling()
@@ -40,6 +41,7 @@ fun DashboardScreen(
         is DashboardUiState.Connected -> DashboardContent(
             data = state.data,
             incidentEvents = incidentEvents,
+            wsConnectionState = wsConnectionState,
             modifier = modifier
         )
     }
@@ -49,38 +51,50 @@ fun DashboardScreen(
 private fun DashboardContent(
     data: DashboardState,
     incidentEvents: List<String>,
+    wsConnectionState: String,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-        // ── Status Cards ──────────────────────────────────────
+        // ── Connection Status ────────────────────────────────────
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatusCard("Gateway", data.gateway.status, Modifier.weight(1f))
-                StatusCard("Sesiones", "${data.sessions.active} activas", Modifier.weight(1f))
-                StatusCard("Queue", "${data.system.queueSize} tareas", Modifier.weight(1f))
-                StatusCard("Errores 24h", "${data.loginFailures24h}", Modifier.weight(1f))
+                StatusCard("Gateway", data.gateway.status.uppercase(), Modifier.weight(1f))
+                StatusCard("Version", data.gateway.version ?: "unknown", Modifier.weight(1f))
+                StatusCard("Sesiones", "${data.sessions.active}", Modifier.weight(1f))
+                StatusCard("WebSocket", wsConnectionState, Modifier.weight(1f))
             }
         }
 
-        // ── System Health ─────────────────────────────────────
+        // ── Agent Info ─────────────────────────────────────────────
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("System Health", style = MaterialTheme.typography.titleMedium)
-                    MetricRow("Memoria", "${data.system.memoryPercent}%")
-                    MetricRow("Disco", "${data.system.diskPercent}%")
-                    MetricRow("Errores", "${data.system.errors}")
+                    Text("Agent", style = MaterialTheme.typography.titleMedium)
+                    if (data.agents.isNotEmpty()) {
+                        data.agents.forEach { agent ->
+                            MetricRow("Name", agent.name)
+                            MetricRow("Model", agent.model)
+                            MetricRow("Type", agent.type)
+                        }
+                    } else {
+                        Text("No agents configured", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
 
-        // ── Agentes ───────────────────────────────────────────
+        // ── System ─────────────────────────────────────────────────
         item {
-            Text("Agentes", style = MaterialTheme.typography.titleMedium)
-        }
-        items(data.agents) { agent ->
-            AgentNodeCard(agent)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("System", style = MaterialTheme.typography.titleMedium)
+                    MetricRow("Mode", data.gateway.mode)
+                    MetricRow("Queue Size", "${data.system.queueSize}")
+                    MetricRow("Errors (24h)", "${data.system.errors}")
+                    MetricRow("Audit Events (24h)", "${data.auditEvents24h}")
+                }
+            }
         }
 
         // ── Incident Stream ───────────────────────────────────
@@ -91,7 +105,7 @@ private fun DashboardContent(
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Box(Modifier.padding(16.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("Sin eventos recientes", style = MaterialTheme.typography.bodySmall)
+                        Text("WebSocket not connected - using REST polling", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

@@ -54,3 +54,19 @@ data class DashboardState(
     val auditEvents24h: Int,
     val loginFailures24h: Int
 )
+
+@Serializable
+data class SessionInfo(
+    val sessionKey: String,
+    val agentId: String,
+    val model: String,
+    val status: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val totalTokens: Long,
+    val messagesCount: Int
+)
+
+fun SessionInfo.isActive(): Boolean = status == "running" || status == "processing"
+
+fun SessionInfo.getDurationMs(): Long = if (updatedAt > createdAt) updatedAt - createdAt else 0L

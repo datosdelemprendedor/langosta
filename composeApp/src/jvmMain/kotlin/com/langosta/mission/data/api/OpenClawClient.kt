@@ -1,6 +1,7 @@
 package com.langosta.mission.data.api
 
 import com.langosta.mission.domain.model.*
+import com.langosta.mission.util.AppLogger
 import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -31,6 +32,41 @@ class OpenClawClient(private val baseUrl: String) {
     suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
         client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
+    suspend fun getHealth(): String {
+        val response = client.get("$baseUrl/health") { withAuth() }.bodyAsText()
+        return response
+    }
+
+    fun dashboardFromConfig(config: OpenClawBootstrapConfig): DashboardState =
+        DashboardState(
+            gateway = GatewayStatus(
+                status = "online",
+                mode = "local",
+                version = config.serverVersion ?: "unknown"
+            ),
+            sessions = SessionsInfo(active = 0, total = 0),
+            agents = listOf(
+                AgentNode(
+                    id = config.assistantAgentId,
+                    name = config.assistantName,
+                    type = "assistant",
+                    model = "openclaw",
+                    tokensIn = 0,
+                    tokensOut = 0,
+                    utilization = 0,
+                    lastSeen = "now"
+                )
+            ),
+            system = SystemMetrics(
+                memoryPercent = 0,
+                diskPercent = 0,
+                errors = 0,
+                queueSize = 0
+            ),
+            auditEvents24h = 0,
+            loginFailures24h = 0
+        )
+
     suspend fun sendMessage(agentId: String, input: String): String {
         val requestBody = buildJsonObject {
             put("model", "openclaw:$agentId")
@@ -42,18 +78,23 @@ class OpenClawClient(private val baseUrl: String) {
             }
         }.toString()
 
-        val json = client.post("$baseUrl/v1/chat/completions") {
-            withAuth()
-            contentType(ContentType.Application.Json)
-            setBody(requestBody)
-        }.bodyAsText()
+        return try {
+            val response = client.post("$baseUrl/v1/chat/completions") {
+                withAuth()
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }.bodyAsText()
 
-        return Json.parseToJsonElement(json)
-            .jsonObject["choices"]!!
-            .jsonArray[0]
-            .jsonObject["message"]!!
-            .jsonObject["content"]!!
-            .jsonPrimitive.content
+            Json.parseToJsonElement(response)
+                .jsonObject["choices"]!!
+                .jsonArray[0]
+                .jsonObject["message"]!!
+                .jsonObject["content"]!!
+                .jsonPrimitive.content
+        } catch (e: Exception) {
+            AppLogger.e("OpenClawClient", "sendMessage failed: ${e.message}")
+            throw Exception("Failed to send message. Ensure /v1/chat/completions is enabled in OpenClaw config. Error: ${e.message}")
+        }
     }
 
 

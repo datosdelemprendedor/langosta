@@ -31,8 +31,11 @@ class WebSocketManager(private val baseUrl: String) {
                     if (challengeFrame is Frame.Text) {
                         // 2. Responder handshake
                         send(Frame.Text(
-                            """{"type":"req","id":"1","method":"connect","params":{"auth":{"token":"$token"},"client":{"id":"langosta-desktop","platform":"jvm","mode":"control-ui"},"minProtocol":1,"maxProtocol":1}}"""
+                            """{"type":"req","id":"1","method":"connect","params":{"auth":{"token":"$token"},"client":{"id":"openclaw-probe","platform":"jvm","mode":"probe","version":"1.0.0"},"minProtocol":3,"maxProtocol":3}}"""
+
                         ))
+
+
                     }
                     // 3. Escuchar eventos
                     for (frame in incoming) {

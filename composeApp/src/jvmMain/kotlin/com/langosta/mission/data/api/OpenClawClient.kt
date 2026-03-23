@@ -1,9 +1,6 @@
 package com.langosta.mission.data.api
 
-import com.langosta.mission.domain.model.Agent
-import com.langosta.mission.domain.model.DashboardState
-import com.langosta.mission.domain.model.OpenClawBootstrapConfig
-import com.langosta.mission.domain.model.Task
+import com.langosta.mission.domain.model.*
 import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -32,8 +29,15 @@ class OpenClawClient(private val baseUrl: String) {
     suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
         client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
-    suspend fun getDashboard(): DashboardState =
-        client.get("$baseUrl/__openclaw/dashboard") { withAuth() }.body()
+    // Dashboard no expone JSON — retorna estado por defecto
+    suspend fun getDashboard(): DashboardState = DashboardState(
+        gateway = GatewayStatus(status = "online", mode = "local"),
+        sessions = SessionsInfo(active = 0, total = 0),
+        agents = emptyList(),
+        system = SystemMetrics(memoryPercent = 0, diskPercent = 0, errors = 0, queueSize = 0),
+        auditEvents24h = 0,
+        loginFailures24h = 0
+    )
 
     suspend fun sendMessage(agentId: String, input: String): String {
         return client.post("$baseUrl/v1/responses") {

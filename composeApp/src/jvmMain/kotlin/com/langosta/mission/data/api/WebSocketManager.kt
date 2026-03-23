@@ -19,11 +19,17 @@ class WebSocketManager(private val baseUrl: String) {
 
     suspend fun connectWithRetry(path: String = "/ws/broadcast") {
         val token = ConfigManager.getAuthToken()
-        val url = "ws://$baseUrl$path${if (token.isNotEmpty()) "?token=$token" else ""}"
+        val host = baseUrl.substringBefore(":")
+        val port = baseUrl.substringAfter(":").toIntOrNull() ?: 18789
+        val fullPath = if (token.isNotEmpty()) "$path?token=$token" else path
         var attempt = 0
         while (true) {
             try {
-                client.webSocket(url) {
+                client.webSocket(
+                    host = host,
+                    port = port,
+                    path = fullPath
+                ) {
                     attempt = 0
                     for (frame in incoming) {
                         if (frame is Frame.Text) {

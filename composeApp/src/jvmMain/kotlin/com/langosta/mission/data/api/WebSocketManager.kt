@@ -1,5 +1,6 @@
 package com.langosta.mission.data.api
 
+import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.websocket.*
@@ -17,10 +18,12 @@ class WebSocketManager(private val baseUrl: String) {
     val events = _events.asSharedFlow()
 
     suspend fun connectWithRetry(path: String = "/ws/broadcast") {
+        val token = ConfigManager.getAuthToken()
+        val url = "ws://$baseUrl$path${if (token.isNotEmpty()) "?token=$token" else ""}"
         var attempt = 0
         while (true) {
             try {
-                client.webSocket("ws://$baseUrl$path") {
+                client.webSocket(url) {
                     attempt = 0
                     for (frame in incoming) {
                         if (frame is Frame.Text) {

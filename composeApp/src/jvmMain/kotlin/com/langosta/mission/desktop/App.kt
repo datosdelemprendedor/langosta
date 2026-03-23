@@ -30,7 +30,8 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
 
                     Sidebar(
                         selected = currentDestination,
-                        onSelect = { currentDestination = it }
+                        onSelect = { currentDestination = it },
+                        isConnected = isConnected
                     )
 
                     VerticalDivider()

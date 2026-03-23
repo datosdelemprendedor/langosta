@@ -19,8 +19,12 @@ fun DashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val incidentEvents by viewModel.incidentEvents.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.startPolling() }
+    LaunchedEffect(Unit) {
+        viewModel.startPolling()
+        viewModel.startIncidentStream()
+    }
 
     when (val state = uiState) {
         is DashboardUiState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -33,12 +37,20 @@ fun DashboardScreen(
                 Button(onClick = { viewModel.retry() }) { Text("Reintentar") }
             }
         }
-        is DashboardUiState.Connected -> DashboardContent(state.data, modifier)
+        is DashboardUiState.Connected -> DashboardContent(
+            data = state.data,
+            incidentEvents = incidentEvents,
+            modifier = modifier
+        )
     }
 }
 
 @Composable
-private fun DashboardContent(data: DashboardState, modifier: Modifier = Modifier) {
+private fun DashboardContent(
+    data: DashboardState,
+    incidentEvents: List<String>,
+    modifier: Modifier = Modifier
+) {
     LazyColumn(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
         // ── Status Cards ──────────────────────────────────────
@@ -69,6 +81,30 @@ private fun DashboardContent(data: DashboardState, modifier: Modifier = Modifier
         }
         items(data.agents) { agent ->
             AgentNodeCard(agent)
+        }
+
+        // ── Incident Stream ───────────────────────────────────
+        item {
+            Text("Incident Stream", style = MaterialTheme.typography.titleMedium)
+        }
+        if (incidentEvents.isEmpty()) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Box(Modifier.padding(16.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("Sin eventos recientes", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        } else {
+            items(incidentEvents) { event ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = event,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
     }
 }

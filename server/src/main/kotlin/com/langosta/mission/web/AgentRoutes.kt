@@ -7,7 +7,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.util.UUID
 
-private val agents = mutableListOf<Agent>()
+internal val agents = mutableListOf<Agent>()
 
 fun Routing.agentRoutes() {
 

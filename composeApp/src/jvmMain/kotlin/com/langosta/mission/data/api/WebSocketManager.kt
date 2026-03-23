@@ -3,9 +3,9 @@ package com.langosta.mission.data.api
 import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlin.text.iterator
 
 class WebSocketManager(private val baseUrl: String) {
 
@@ -13,21 +13,29 @@ class WebSocketManager(private val baseUrl: String) {
         install(WebSockets)
     }
 
-    private val _messages = MutableSharedFlow<String>()
-    val messages = _messages.asSharedFlow()
+    private val _events = MutableSharedFlow<String>()
+    val events = _events.asSharedFlow()
 
-    suspend fun connect() {
-        client.webSocket("ws://$baseUrl/ws") {
-            for (frame in incoming) {
-                if (frame is Frame.Text) {
-                    _messages.emit(frame.readText())
+    suspend fun connectWithRetry(path: String = "/ws/broadcast") {
+        var attempt = 0
+        while (true) {
+            try {
+                client.webSocket("ws://$baseUrl$path") {
+                    attempt = 0
+                    for (frame in incoming) {
+                        if (frame is Frame.Text) {
+                            _events.emit(frame.readText())
+                        }
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                attempt++
+                val delay = minOf(1000L * attempt, 30_000L)
+                delay(delay)
             }
         }
-    }
-
-    suspend fun send(message: String) {
-        // Se implementa desde la sesión activa
     }
 
     fun close() = client.close()

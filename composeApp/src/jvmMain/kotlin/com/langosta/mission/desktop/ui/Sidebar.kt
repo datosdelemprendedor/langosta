@@ -20,6 +20,7 @@ import com.langosta.mission.desktop.AppDestination
 fun Sidebar(
     selected: AppDestination,
     onSelect: (AppDestination) -> Unit,
+    isConnected: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val expandedSections = remember {
@@ -36,20 +37,32 @@ fun Sidebar(
             .padding(vertical = 16.dp, horizontal = 8.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // Logo
-        Text(
-            text = "🦞 Langosta",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
-        Text(
-            text = "Mission Control",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 8.dp)
-        )
+        // Logo + indicador de conexión
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Column {
+                Text(
+                    text = "🦞 Langosta",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Mission Control",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (isConnected) Color(0xFF4CAF50) else Color(0xFFF44336))
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -61,7 +74,6 @@ fun Sidebar(
             val hasActiveChild = section.children.any { it == selected }
             val isSelected = selected == section
 
-            // Header sección
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -102,7 +114,6 @@ fun Sidebar(
                 }
             }
 
-            // Submenús
             if (isExpanded && section.children.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 section.children.forEach { child ->

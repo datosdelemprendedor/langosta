@@ -10,10 +10,10 @@ import com.langosta.mission.desktop.TaskViewModel
 import com.langosta.mission.util.ConfigManager
 import kotlinx.coroutines.launch
 
-
 @Composable
 fun SetupScreen(viewModel: TaskViewModel, onConnect: () -> Unit) {
     var serverUrl by remember { mutableStateOf(ConfigManager.getServerUrl()) }
+    var wsUrl by remember { mutableStateOf(ConfigManager.getWebSocketUrl()) }
     var isLoading by remember { mutableStateOf(false) }
     var connectionError by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -32,11 +32,20 @@ fun SetupScreen(viewModel: TaskViewModel, onConnect: () -> Unit) {
 
         OutlinedTextField(
             value = serverUrl,
-            onValueChange = {
-                serverUrl = it
-                connectionError = false
-            },
-            label = { Text("Server URL") },
+            onValueChange = { serverUrl = it; connectionError = false },
+            label = { Text("Server URL (HTTP)") },
+            placeholder = { Text("http://localhost:8000") },
+            modifier = Modifier.fillMaxWidth(0.6f),
+            isError = connectionError
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = wsUrl,
+            onValueChange = { wsUrl = it; connectionError = false },
+            label = { Text("WebSocket host:port") },
+            placeholder = { Text("localhost:8000") },
             modifier = Modifier.fillMaxWidth(0.6f),
             isError = connectionError
         )
@@ -49,6 +58,7 @@ fun SetupScreen(viewModel: TaskViewModel, onConnect: () -> Unit) {
                     isLoading = true
                     connectionError = false
                     ConfigManager.set("server_url", serverUrl)
+                    ConfigManager.set("ws_url", wsUrl)
                     val ok = viewModel.testConnection()
                     isLoading = false
                     if (ok) onConnect()
@@ -59,10 +69,7 @@ fun SetupScreen(viewModel: TaskViewModel, onConnect: () -> Unit) {
             enabled = !isLoading
         ) {
             if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp
-                )
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
                 Text("Connect")
             }

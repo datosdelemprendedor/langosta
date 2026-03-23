@@ -26,6 +26,7 @@ fun main() {
         routing {
             taskRoutes()
             agentRoutes()
+            gatewayRoutes()
         }
     }.start(wait = true)
 }

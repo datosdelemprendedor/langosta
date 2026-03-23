@@ -8,7 +8,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.util.UUID
 
-private val tasks = mutableListOf<Task>()
+internal val tasks = mutableListOf<Task>()
 
 fun Routing.taskRoutes() {
 

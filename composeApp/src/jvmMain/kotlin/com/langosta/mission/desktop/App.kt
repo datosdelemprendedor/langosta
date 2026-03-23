@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.langosta.mission.desktop.ui.AgentPanel
 import com.langosta.mission.desktop.ui.NotificationPanel
 import com.langosta.mission.desktop.ui.SetupScreen
 import com.langosta.mission.desktop.ui.TaskBoardScreen
@@ -20,6 +21,10 @@ fun App(viewModel: TaskViewModel) {
                 SetupScreen(viewModel = viewModel, onConnect = { isConnected = true })
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
+                    AgentPanel(
+                        viewModel = viewModel,
+                        modifier = Modifier
+                    )
                     TaskBoardScreen(
                         viewModel = viewModel,
                         modifier = Modifier.weight(1f)

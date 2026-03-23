@@ -18,7 +18,13 @@ fun App(viewModel: TaskViewModel) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             if (!isConnected) {
-                SetupScreen(viewModel = viewModel, onConnect = { isConnected = true })
+                SetupScreen(
+                    viewModel = viewModel,
+                    onConnect = {
+                        isConnected = true
+                        viewModel.startAutoRefresh()
+                    }
+                )
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
                     AgentPanel(

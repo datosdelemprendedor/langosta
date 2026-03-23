@@ -6,6 +6,7 @@ import com.langosta.mission.domain.model.Agent
 import com.langosta.mission.domain.model.Task
 import com.langosta.mission.domain.model.TaskStatus
 import com.langosta.mission.util.AppLogger
+import kotlinx.coroutines.delay
 import com.langosta.mission.util.ConfigManager
 import com.langosta.mission.util.NotificationManager
 import kotlinx.coroutines.*
@@ -98,6 +99,22 @@ class TaskViewModel(private val repository: TaskRepository) {
             } catch (e: Exception) {
                 _error.value = e.message
                 AppLogger.e("TaskViewModel", "Error creating task", e)
+            }
+        }
+    }
+    fun startAutoRefresh() {
+        scope.launch {
+            while (true) {
+                delay(5000)
+                try {
+                    repository.fetchTasks()
+                    val client = OpenClawClient(ConfigManager.getServerUrl())
+                    _agents.value = client.getAgents()
+                    _serverStatus.value = true
+                } catch (e: Exception) {
+                    _serverStatus.value = false
+                    AppLogger.e("TaskViewModel", "Auto-refresh error", e)
+                }
             }
         }
     }

@@ -1,6 +1,5 @@
 package com.langosta.mission.desktop.ui
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,34 +10,73 @@ import androidx.compose.ui.unit.dp
 import com.langosta.mission.util.AppNotification
 import com.langosta.mission.util.NotificationManager
 import com.langosta.mission.util.NotificationType
+import java.text.SimpleDateFormat
+import java.util.Date
 
 @Composable
-fun NotificationPanel() {
+fun NotificationPanel(
+    darkTheme: Boolean,
+    onToggleTheme: () -> Unit
+) {
     val notifications = remember { mutableStateListOf<AppNotification>() }
 
     LaunchedEffect(Unit) {
         NotificationManager.notifications.collect { notification ->
             notifications.add(0, notification)
-            if (notifications.size > 20) notifications.removeLast()
+            if (notifications.size > 50) notifications.removeLast()
         }
     }
 
     Column(modifier = Modifier.fillMaxHeight().width(280.dp).padding(8.dp)) {
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("Notifications", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Log", style = MaterialTheme.typography.titleSmall)
+                if (notifications.isNotEmpty()) {
+                    Badge { Text(notifications.size.toString()) }
+                }
+            }
             TextButton(onClick = { notifications.clear() }) {
                 Text("Clear")
             }
         }
 
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Toggle dark/light
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (darkTheme) "🌙 Dark" else "☀️ Light",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Switch(
+                checked = darkTheme,
+                onCheckedChange = { onToggleTheme() }
+            )
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(notifications, key = { it.id }) { notification ->
-                NotificationItem(notification)
+        if (notifications.isEmpty()) {
+            Text(
+                text = "Sin eventos",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(notifications, key = { it.id }) { notification ->
+                    NotificationItem(notification)
+                }
             }
         }
     }
@@ -53,12 +91,24 @@ fun NotificationItem(notification: AppNotification) {
         NotificationType.INFO -> MaterialTheme.colorScheme.surfaceVariant
     }
 
+    val timeStr = SimpleDateFormat("HH:mm:ss").format(Date(notification.id.toLongOrNull() ?: 0L))
+
     Card(
         colors = CardDefaults.cardColors(containerColor = containerColor),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
-            Text(notification.title, style = MaterialTheme.typography.labelMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(notification.title, style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text(notification.message, style = MaterialTheme.typography.bodySmall)
         }
     }

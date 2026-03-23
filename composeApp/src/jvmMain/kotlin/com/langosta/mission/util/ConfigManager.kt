@@ -34,7 +34,7 @@ object ConfigManager {
     }
 
     private fun loadEnvFile() {
-        val envFile = File(".env")
+        val envFile = File("C:/Users/curso/IdeaProjects/langosta/.env")
         if (!envFile.exists()) return
         envFile.forEachLine { line ->
             val trimmed = line.trim()

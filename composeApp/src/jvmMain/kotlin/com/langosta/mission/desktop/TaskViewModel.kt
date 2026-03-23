@@ -58,7 +58,7 @@ class TaskViewModel(private val repository: TaskRepository) {
     suspend fun testConnection(): Boolean {
         return try {
             val client = OpenClawClient(ConfigManager.getServerUrl())
-            client.getTasks()
+            client.ping()
             _serverStatus.value = true
             true
         } catch (e: Exception) {
@@ -83,7 +83,6 @@ class TaskViewModel(private val repository: TaskRepository) {
         scope.launch {
             try {
                 val task = tasks.value.find { it.id == taskId }
-
                 repository.updateStatus(taskId, status)
 
                 if (status == TaskStatus.COMPLETED || status == TaskStatus.FAILED) {
@@ -105,7 +104,6 @@ class TaskViewModel(private val repository: TaskRepository) {
                     )
                     _history.value = TaskHistoryDatabase.getAll()
                 }
-
                 NotificationManager.success("Updated", "Task status → ${status.name}")
             } catch (e: Exception) {
                 _error.value = e.message
@@ -114,23 +112,17 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
+    // Enviar mensaje al agente principal de OpenCLAW
     fun createTask(title: String, description: String, agentId: String?) {
         scope.launch {
             try {
                 val client = OpenClawClient(ConfigManager.getServerUrl())
-                val newTask = Task(
-                    id = "",
-                    title = title,
-                    description = description,
-                    status = TaskStatus.PENDING,
-                    assignedAgentId = agentId
-                )
-                client.createTask(newTask)
-                repository.fetchTasks()
-                NotificationManager.success("Tarea creada", title)
+                val targetAgent = agentId ?: _agents.value.firstOrNull()?.id ?: "main"
+                client.sendMessage(targetAgent, "$title\n$description")
+                NotificationManager.success("Mensaje enviado", title)
             } catch (e: Exception) {
                 _error.value = e.message
-                AppLogger.e("TaskViewModel", "Error creating task", e)
+                AppLogger.e("TaskViewModel", "Error sending message", e)
             }
         }
     }
@@ -140,7 +132,6 @@ class TaskViewModel(private val repository: TaskRepository) {
             while (true) {
                 delay(5000)
                 try {
-                    repository.fetchTasks()
                     val client = OpenClawClient(ConfigManager.getServerUrl())
                     _agents.value = client.getAgents()
                     _serverStatus.value = true
@@ -153,9 +144,7 @@ class TaskViewModel(private val repository: TaskRepository) {
     }
 
     fun loadHistory() {
-        scope.launch {
-            _history.value = TaskHistoryDatabase.getAll()
-        }
+        scope.launch { _history.value = TaskHistoryDatabase.getAll() }
     }
 
     fun clearHistory() {
@@ -165,11 +154,7 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
-    fun clearError() {
-        _error.value = null
-    }
+    fun clearError() { _error.value = null }
 
-    fun dispose() {
-        scope.cancel()
-    }
+    fun dispose() { scope.cancel() }
 }

@@ -9,6 +9,7 @@ import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 
@@ -22,34 +23,40 @@ class OpenClawClient(private val baseUrl: String) {
 
     private fun HttpRequestBuilder.withAuth() {
         val token = ConfigManager.getAuthToken()
-        if (token.isNotEmpty()) {
-            header("Authorization", "Bearer $token")
-        }
+        if (token.isNotEmpty()) header("Authorization", "Bearer $token")
     }
 
-    suspend fun getAgents(): List<Agent> =
-        client.get("$baseUrl/agents") { withAuth() }.body()
-
-    suspend fun getTasks(): List<Task> =
-        client.get("$baseUrl/tasks") { withAuth() }.body()
-
-    suspend fun createTask(task: Task): Task =
-        client.post("$baseUrl/tasks") {
-            withAuth()
-            setBody(task)
-        }.body()
-
-    suspend fun updateTaskStatus(taskId: String, status: String): Task =
-        client.patch("$baseUrl/tasks/$taskId/status") {
-            withAuth()
-            setBody(mapOf("status" to status))
-        }.body()
+    suspend fun ping(): OpenClawBootstrapConfig =
+        client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
     suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
         client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
     suspend fun getDashboard(): DashboardState =
         client.get("$baseUrl/__openclaw/dashboard") { withAuth() }.body()
+
+    suspend fun sendMessage(agentId: String, input: String): String {
+        return client.post("$baseUrl/v1/responses") {
+            withAuth()
+            contentType(ContentType.Application.Json)
+            header("x-openclaw-agent-id", agentId)
+            setBody(mapOf("model" to "openclaw", "input" to input))
+        }.body()
+    }
+
+    suspend fun getAgents(): List<Agent> {
+        val config = getBootstrapConfig()
+        return listOf(
+            Agent(
+                id = config.assistantAgentId,
+                name = config.assistantName,
+                model = "openclaw",
+                isOnline = true
+            )
+        )
+    }
+
+    suspend fun getTasks(): List<Task> = emptyList()
 
     fun close() = client.close()
 }

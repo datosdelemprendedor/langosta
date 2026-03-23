@@ -9,7 +9,8 @@ import com.langosta.mission.util.ConfigManager
 
 fun main() = application {
     ConfigManager.loadDefaults()
-
+    println(">>> SERVER URL: ${ConfigManager.getServerUrl()}")
+    println(">>> TOKEN: ${ConfigManager.getAuthToken()}")
     val db = DatabaseManager()
     val client = OpenClawClient(ConfigManager.getServerUrl())
     val repository = TaskRepository(client, db)

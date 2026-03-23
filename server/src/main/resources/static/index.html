@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCLAW Mission Control</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <h1>🦞 OpenCLAW Mission Control</h1>
+    <div id="status" class="status offline">Disconnected</div>
+</header>
+
+<main>
+    <section id="agents-section">
+        <h2>Agents</h2>
+        <div id="agents-list" class="card-grid"></div>
+    </section>
+
+    <section id="tasks-section">
+        <h2>Tasks</h2>
+        <button id="refresh-btn" onclick="loadTasks()">Refresh</button>
+        <div id="tasks-list" class="card-grid"></div>
+    </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

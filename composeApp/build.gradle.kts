@@ -32,6 +32,8 @@ kotlin {
             implementation(libs.ktor.client.contentNegotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.kotlinx.serialization.json)
+            implementation("org.xerial:sqlite-jdbc:3.45.3.0")
+
         }
     }
 }

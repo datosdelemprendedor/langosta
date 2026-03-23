@@ -1,13 +1,14 @@
 package com.langosta.mission.web
 
-import com.langosta.mission.data.api.dto.TaskDto
+import com.langosta.mission.domain.model.Task
+import com.langosta.mission.domain.model.TaskStatus
 import io.ktor.http.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.util.UUID
 
-private val tasks = mutableListOf<TaskDto>()
+private val tasks = mutableListOf<Task>()
 
 fun Routing.taskRoutes() {
 
@@ -18,7 +19,7 @@ fun Routing.taskRoutes() {
         }
 
         post {
-            val task = call.receive<TaskDto>()
+            val task = call.receive<Task>()
             val newTask = task.copy(
                 id = UUID.randomUUID().toString(),
                 createdAt = System.currentTimeMillis(),
@@ -41,10 +42,13 @@ fun Routing.taskRoutes() {
             val newStatus = body["status"] ?: return@patch call.respond(
                 HttpStatusCode.BadRequest, "Missing status"
             )
+            val status = runCatching { TaskStatus.valueOf(newStatus) }.getOrElse {
+                return@patch call.respond(HttpStatusCode.BadRequest, "Invalid status: $newStatus")
+            }
             val index = tasks.indexOfFirst { it.id == id }
             if (index == -1) return@patch call.respond(HttpStatusCode.NotFound, "Task not found")
             tasks[index] = tasks[index].copy(
-                status = newStatus,
+                status = status,
                 updatedAt = System.currentTimeMillis()
             )
             call.respond(tasks[index])

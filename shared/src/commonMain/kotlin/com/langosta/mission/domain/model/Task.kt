@@ -1,5 +1,8 @@
 package com.langosta.mission.domain.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class Task(
     val id: String,
     val title: String,

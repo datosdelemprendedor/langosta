@@ -15,18 +15,30 @@ fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val serverStatus by viewModel.serverStatus.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.fetchTasks()
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+
+        // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Task Board", style = MaterialTheme.typography.headlineMedium)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (serverStatus) "🟢" else "🔴",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text("Mission Control", style = MaterialTheme.typography.headlineMedium)
+            }
             Button(onClick = { viewModel.fetchTasks() }) {
                 Text("Refresh")
             }
@@ -34,6 +46,12 @@ fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Stats
+        StatsBar(tasks = tasks)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Error
         error?.let {
             Card(
                 colors = CardDefaults.cardColors(
@@ -50,6 +68,7 @@ fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(8.dp))
         }
 
+        // Task list
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()

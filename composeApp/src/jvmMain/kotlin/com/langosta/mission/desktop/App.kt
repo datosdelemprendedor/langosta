@@ -17,7 +17,7 @@ fun App(viewModel: TaskViewModel) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             if (!isConnected) {
-                SetupScreen(onConnect = { isConnected = true })
+                SetupScreen(viewModel = viewModel, onConnect = { isConnected = true })
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
                     TaskBoardScreen(

@@ -1,9 +1,12 @@
 package com.langosta.mission.desktop
 
+import com.langosta.mission.data.api.OpenClawClient
 import com.langosta.mission.data.repository.TaskRepository
+import com.langosta.mission.domain.model.Agent
 import com.langosta.mission.domain.model.Task
 import com.langosta.mission.domain.model.TaskStatus
 import com.langosta.mission.util.AppLogger
+import com.langosta.mission.util.ConfigManager
 import com.langosta.mission.util.NotificationManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,12 @@ class TaskViewModel(private val repository: TaskRepository) {
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
+    private val _serverStatus = MutableStateFlow(false)
+    val serverStatus = _serverStatus.asStateFlow()
+
+    private val _agents = MutableStateFlow<List<Agent>>(emptyList())
+    val agents = _agents.asStateFlow()
+
     val tasks = repository.tasks
 
     fun fetchTasks() {
@@ -33,6 +42,30 @@ class TaskViewModel(private val repository: TaskRepository) {
                 NotificationManager.error("Error", e.message ?: "Unknown error")
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    suspend fun testConnection(): Boolean {
+        return try {
+            val client = OpenClawClient(ConfigManager.getServerUrl())
+            client.getTasks()
+            _serverStatus.value = true
+            true
+        } catch (e: Exception) {
+            _serverStatus.value = false
+            false
+        }
+    }
+
+    fun fetchAgents() {
+        scope.launch {
+            try {
+                val client = OpenClawClient(ConfigManager.getServerUrl())
+                _agents.value = client.getAgents()
+                AppLogger.i("TaskViewModel", "Agents loaded")
+            } catch (e: Exception) {
+                AppLogger.e("TaskViewModel", "Error fetching agents", e)
             }
         }
     }

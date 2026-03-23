@@ -3,6 +3,8 @@ package com.langosta.mission.data.api
 import com.langosta.mission.domain.model.*
 import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
+import io.ktor.client.statement.*
+import kotlinx.serialization.json.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
@@ -39,14 +41,24 @@ class OpenClawClient(private val baseUrl: String) {
         loginFailures24h = 0
     )
 
+    // NUEVO
     suspend fun sendMessage(agentId: String, input: String): String {
-        return client.post("$baseUrl/v1/responses") {
+        val json = client.post("$baseUrl/v1/chat/completions") {
             withAuth()
             contentType(ContentType.Application.Json)
-            header("x-openclaw-agent-id", agentId)
-            setBody(mapOf("model" to "openclaw", "input" to input))
-        }.body()
+            setBody(mapOf(
+                "model" to "openclaw:$agentId",
+                "messages" to listOf(mapOf("role" to "user", "content" to input))
+            ))
+        }.bodyAsText()
+        return Json.parseToJsonElement(json)
+            .jsonObject["choices"]!!
+            .jsonArray[0]
+            .jsonObject["message"]!!
+            .jsonObject["content"]!!
+            .jsonPrimitive.content
     }
+
 
     suspend fun getAgents(): List<Agent> {
         val config = getBootstrapConfig()

@@ -32,14 +32,22 @@ class OpenClawClient(private val baseUrl: String) {
         client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
     suspend fun sendMessage(agentId: String, input: String): String {
+        val requestBody = buildJsonObject {
+            put("model", "openclaw:$agentId")
+            putJsonArray("messages") {
+                addJsonObject {
+                    put("role", "user")
+                    put("content", input)
+                }
+            }
+        }.toString()
+
         val json = client.post("$baseUrl/v1/chat/completions") {
             withAuth()
             contentType(ContentType.Application.Json)
-            setBody(ChatRequest(
-                model = "openclaw:$agentId",
-                messages = listOf(ChatMessage(role = "user", content = input))
-            ))
+            setBody(requestBody)
         }.bodyAsText()
+
         return Json.parseToJsonElement(json)
             .jsonObject["choices"]!!
             .jsonArray[0]
@@ -47,6 +55,7 @@ class OpenClawClient(private val baseUrl: String) {
             .jsonObject["content"]!!
             .jsonPrimitive.content
     }
+
 
     suspend fun getAgents(): List<Agent> {
         val config = getBootstrapConfig()
@@ -64,15 +73,3 @@ class OpenClawClient(private val baseUrl: String) {
 
     fun close() = client.close()
 }
-
-@Serializable
-internal data class ChatRequest(
-    val model: String,
-    val messages: List<ChatMessage>
-)
-
-@Serializable
-internal data class ChatMessage(
-    val role: String,
-    val content: String
-)

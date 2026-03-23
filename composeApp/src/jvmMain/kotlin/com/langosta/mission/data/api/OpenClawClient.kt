@@ -5,6 +5,7 @@ import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
 import io.ktor.client.statement.*
 import kotlinx.serialization.json.*
+import kotlinx.serialization.Serializable
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
@@ -31,24 +32,27 @@ class OpenClawClient(private val baseUrl: String) {
     suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
         client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
-    // Dashboard no expone JSON — retorna estado por defecto
-    suspend fun getDashboard(): DashboardState = DashboardState(
-        gateway = GatewayStatus(status = "online", mode = "local"),
-        sessions = SessionsInfo(active = 0, total = 0),
-        agents = emptyList(),
-        system = SystemMetrics(memoryPercent = 0, diskPercent = 0, errors = 0, queueSize = 0),
-        auditEvents24h = 0,
-        loginFailures24h = 0
-    )
 
     // NUEVO
+    @Serializable
+    private data class ChatRequest(
+        val model: String,
+        val messages: List<ChatMessage>
+    )
+
+    @Serializable
+    private data class ChatMessage(
+        val role: String,
+        val content: String
+    )
+
     suspend fun sendMessage(agentId: String, input: String): String {
         val json = client.post("$baseUrl/v1/chat/completions") {
             withAuth()
             contentType(ContentType.Application.Json)
-            setBody(mapOf(
-                "model" to "openclaw:$agentId",
-                "messages" to listOf(mapOf("role" to "user", "content" to input))
+            setBody(ChatRequest(
+                model = "openclaw:$agentId",
+                messages = listOf(ChatMessage(role = "user", content = input))
             ))
         }.bodyAsText()
         return Json.parseToJsonElement(json)
@@ -58,6 +62,7 @@ class OpenClawClient(private val baseUrl: String) {
             .jsonObject["content"]!!
             .jsonPrimitive.content
     }
+
 
 
     suspend fun getAgents(): List<Agent> {

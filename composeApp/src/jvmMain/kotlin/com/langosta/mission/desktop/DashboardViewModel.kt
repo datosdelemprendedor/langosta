@@ -1,7 +1,6 @@
 package com.langosta.mission.desktop
 
 import com.langosta.mission.data.api.OpenClawClient
-import com.langosta.mission.data.api.WebSocketManager
 import com.langosta.mission.data.repository.DashboardRepository
 import com.langosta.mission.domain.model.DashboardState
 import com.langosta.mission.util.AppLogger
@@ -29,9 +28,6 @@ class DashboardViewModel {
     private fun buildRepository(): DashboardRepository =
         DashboardRepository(OpenClawClient(ConfigManager.getServerUrl()))
 
-    private fun buildWebSocket(): WebSocketManager =
-        WebSocketManager(ConfigManager.getWebSocketUrl())
-
     fun startPolling() {
         scope.launch {
             val repository = buildRepository()
@@ -42,20 +38,9 @@ class DashboardViewModel {
         }
     }
 
+    // WebSocket desactivado — /ws/broadcast no está disponible en OpenCLAW
     fun startIncidentStream() {
-        scope.launch {
-            val ws = buildWebSocket()
-            try {
-                ws.connectWithRetry("/ws/broadcast")
-            } catch (e: Exception) {
-                AppLogger.e("DashboardViewModel", "WebSocket error", e)
-            }
-            ws.events.collect { event ->
-                val current = _incidentEvents.value.toMutableList()
-                current.add(0, event)
-                _incidentEvents.value = current.take(50)
-            }
-        }
+        AppLogger.i("DashboardViewModel", "WebSocket desactivado temporalmente")
     }
 
     fun retry() {

@@ -14,7 +14,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 @Composable
-fun NotificationPanel() {
+fun NotificationPanel(
+    darkTheme: Boolean,
+    onToggleTheme: () -> Unit
+) {
     val notifications = remember { mutableStateListOf<AppNotification>() }
 
     LaunchedEffect(Unit) {
@@ -30,7 +33,8 @@ fun NotificationPanel() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Log", style = MaterialTheme.typography.titleSmall)
                 if (notifications.isNotEmpty()) {
                     Badge { Text(notifications.size.toString()) }
@@ -39,6 +43,25 @@ fun NotificationPanel() {
             TextButton(onClick = { notifications.clear() }) {
                 Text("Clear")
             }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Toggle dark/light
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (darkTheme) "🌙 Dark" else "☀️ Light",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Switch(
+                checked = darkTheme,
+                onCheckedChange = { onToggleTheme() }
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -80,8 +103,11 @@ fun NotificationItem(notification: AppNotification) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(notification.title, style = MaterialTheme.typography.labelMedium)
-                Text(timeStr, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Text(notification.message, style = MaterialTheme.typography.bodySmall)
         }

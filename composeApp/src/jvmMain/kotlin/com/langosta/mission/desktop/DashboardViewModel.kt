@@ -1,8 +1,8 @@
 package com.langosta.mission.desktop
 
 import com.langosta.mission.data.api.OpenClawClient
+import com.langosta.mission.data.api.WebSocketManager
 import com.langosta.mission.data.repository.DashboardRepository
-import com.langosta.mission.domain.model.DashboardState
 import com.langosta.mission.util.AppLogger
 import com.langosta.mission.util.ConfigManager
 import kotlinx.coroutines.*
@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 sealed class DashboardUiState {
     object Loading : DashboardUiState()
-    data class Connected(val data: DashboardState) : DashboardUiState()
+    data class Connected(val data: com.langosta.mission.domain.model.DashboardState) : DashboardUiState()
     data class Error(val message: String) : DashboardUiState()
 }
 
@@ -25,22 +25,46 @@ class DashboardViewModel {
     private val _incidentEvents = MutableStateFlow<List<String>>(emptyList())
     val incidentEvents = _incidentEvents.asStateFlow()
 
+    private val wsManager = WebSocketManager(
+        ConfigManager.getServerUrl().removePrefix("http://")
+    )
+
     private fun buildRepository(): DashboardRepository =
         DashboardRepository(OpenClawClient(ConfigManager.getServerUrl()))
 
     fun startPolling() {
         scope.launch {
-            val repository = buildRepository()
-            repository.dashboardStream().collect { state ->
-                _uiState.value = DashboardUiState.Connected(state)
-                AppLogger.i("DashboardViewModel", "Dashboard updated")
+            try {
+                val repository = buildRepository()
+                repository.dashboardStream().collect { state ->
+                    _uiState.value = DashboardUiState.Connected(state)
+                    AppLogger.i("DashboardViewModel", "Dashboard updated")
+                }
+            } catch (e: Exception) {
+                _uiState.value = DashboardUiState.Error(e.message ?: "Error desconocido")
+                AppLogger.e("DashboardViewModel", "Polling error", e)
             }
         }
     }
 
-    // WebSocket desactivado — /ws/broadcast no está disponible en OpenCLAW
     fun startIncidentStream() {
-        AppLogger.i("DashboardViewModel", "WebSocket desactivado temporalmente")
+        // Conectar WebSocket
+        scope.launch {
+            try {
+                wsManager.connectWithRetry()
+            } catch (e: Exception) {
+                AppLogger.e("DashboardViewModel", "WebSocket error", e)
+            }
+        }
+        // Consumir eventos
+        scope.launch {
+            wsManager.events.collect { event ->
+                val current = _incidentEvents.value.toMutableList()
+                current.add(0, event)
+                _incidentEvents.value = current.take(50)
+                AppLogger.i("DashboardViewModel", "WS event: $event")
+            }
+        }
     }
 
     fun retry() {
@@ -49,6 +73,7 @@ class DashboardViewModel {
     }
 
     fun dispose() {
+        wsManager.close()
         scope.cancel()
     }
 }

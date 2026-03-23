@@ -9,16 +9,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.langosta.mission.desktop.TaskViewModel
+import com.langosta.mission.domain.model.TaskStatus
 
 @Composable
 fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
     val tasks by viewModel.tasks.collectAsState()
+    val agents by viewModel.agents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val serverStatus by viewModel.serverStatus.collectAsState()
 
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var selectedFilter by remember { mutableStateOf<TaskStatus?>(null) }
+
     LaunchedEffect(Unit) {
         viewModel.fetchTasks()
+    }
+
+    if (showCreateDialog) {
+        CreateTaskDialog(
+            agents = agents,
+            onDismiss = { showCreateDialog = false },
+            onCreate = { title, description, agentId ->
+                viewModel.createTask(title, description, agentId)
+                showCreateDialog = false
+            }
+        )
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
@@ -39,8 +55,13 @@ fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
                 )
                 Text("Mission Control", style = MaterialTheme.typography.headlineMedium)
             }
-            Button(onClick = { viewModel.fetchTasks() }) {
-                Text("Refresh")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { showCreateDialog = true }) {
+                    Text("+ Nueva Tarea")
+                }
+                OutlinedButton(onClick = { viewModel.fetchTasks() }) {
+                    Text("Refresh")
+                }
             }
         }
 
@@ -50,6 +71,24 @@ fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
         StatsBar(tasks = tasks)
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Filtros
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = selectedFilter == null,
+                onClick = { selectedFilter = null },
+                label = { Text("ALL") }
+            )
+            TaskStatus.entries.forEach { status ->
+                FilterChip(
+                    selected = selectedFilter == status,
+                    onClick = { selectedFilter = status },
+                    label = { Text(status.name) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Error
         error?.let {
@@ -69,13 +108,16 @@ fun TaskBoardScreen(viewModel: TaskViewModel, modifier: Modifier = Modifier) {
         }
 
         // Task list
+        val filtered = if (selectedFilter == null) tasks
+        else tasks.filter { it.status == selectedFilter }
+
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(tasks) { task ->
+                items(filtered) { task ->
                     TaskCard(
                         task = task,
                         onStatusChange = { newStatus ->

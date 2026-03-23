@@ -81,6 +81,26 @@ class TaskViewModel(private val repository: TaskRepository) {
             }
         }
     }
+    fun createTask(title: String, description: String, agentId: String?) {
+        scope.launch {
+            try {
+                val client = OpenClawClient(ConfigManager.getServerUrl())
+                val newTask = Task(
+                    id = "",
+                    title = title,
+                    description = description,
+                    status = TaskStatus.PENDING,
+                    assignedAgentId = agentId
+                )
+                client.createTask(newTask)
+                repository.fetchTasks()
+                NotificationManager.success("Tarea creada", title)
+            } catch (e: Exception) {
+                _error.value = e.message
+                AppLogger.e("TaskViewModel", "Error creating task", e)
+            }
+        }
+    }
 
     fun clearError() {
         _error.value = null

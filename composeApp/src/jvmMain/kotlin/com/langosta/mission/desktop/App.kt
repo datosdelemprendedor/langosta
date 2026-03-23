@@ -10,7 +10,7 @@ import com.langosta.mission.desktop.ui.*
 import com.langosta.mission.desktop.ui.theme.AppTheme
 
 @Composable
-fun App(viewModel: TaskViewModel) {
+fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
     var isConnected by remember { mutableStateOf(false) }
     var darkTheme by remember { mutableStateOf(true) }
     var currentDestination by remember { mutableStateOf(AppDestination.DASHBOARD) }
@@ -28,7 +28,6 @@ fun App(viewModel: TaskViewModel) {
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
 
-                    // Sidebar
                     Sidebar(
                         selected = currentDestination,
                         onSelect = { currentDestination = it }
@@ -36,10 +35,9 @@ fun App(viewModel: TaskViewModel) {
 
                     VerticalDivider()
 
-                    // Contenido principal
                     when (currentDestination) {
-                        AppDestination.DASHBOARD -> TaskBoardScreen(
-                            viewModel = viewModel,
+                        AppDestination.DASHBOARD -> DashboardScreen(
+                            viewModel = dashboardViewModel,
                             modifier = Modifier.weight(1f)
                         )
                         AppDestination.AGENTS,
@@ -65,7 +63,6 @@ fun App(viewModel: TaskViewModel) {
 
                     VerticalDivider()
 
-                    // Panel de notificaciones
                     NotificationPanel(
                         darkTheme = darkTheme,
                         onToggleTheme = { darkTheme = !darkTheme }

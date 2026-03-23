@@ -1,6 +1,8 @@
 package com.langosta.mission.data.api
 
 import com.langosta.mission.domain.model.Agent
+import com.langosta.mission.domain.model.DashboardState
+import com.langosta.mission.domain.model.OpenClawBootstrapConfig
 import com.langosta.mission.domain.model.Task
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -32,6 +34,12 @@ class OpenClawClient(private val baseUrl: String) {
         client.patch("$baseUrl/tasks/$taskId/status") {
             setBody(mapOf("status" to status))
         }.body()
+
+    suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
+        client.get("$baseUrl/__openclaw/control-ui-config.json").body()
+
+    suspend fun getDashboard(): DashboardState =
+        client.get("$baseUrl/__openclaw/dashboard").body()
 
     fun close() = client.close()
 }

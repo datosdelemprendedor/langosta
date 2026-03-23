@@ -14,11 +14,12 @@ fun main() = application {
     val client = OpenClawClient(ConfigManager.getServerUrl())
     val repository = TaskRepository(client, db)
     val viewModel = TaskViewModel(repository)
+    val dashboardViewModel = DashboardViewModel()
 
     Window(
         onCloseRequest = ::exitApplication,
         title = "OpenCLAW Mission Control"
     ) {
-        App(viewModel)
+        App(viewModel, dashboardViewModel)
     }
 }

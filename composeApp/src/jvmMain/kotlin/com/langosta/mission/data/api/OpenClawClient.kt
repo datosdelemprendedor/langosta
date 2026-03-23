@@ -3,15 +3,14 @@ package com.langosta.mission.data.api
 import com.langosta.mission.domain.model.*
 import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
-import io.ktor.client.statement.*
-import kotlinx.serialization.json.*
-import kotlinx.serialization.Serializable
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
 
 class OpenClawClient(private val baseUrl: String) {
 
@@ -32,20 +31,6 @@ class OpenClawClient(private val baseUrl: String) {
     suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
         client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
 
-
-    // NUEVO
-    @Serializable
-    private data class ChatRequest(
-        val model: String,
-        val messages: List<ChatMessage>
-    )
-
-    @Serializable
-    private data class ChatMessage(
-        val role: String,
-        val content: String
-    )
-
     suspend fun sendMessage(agentId: String, input: String): String {
         val json = client.post("$baseUrl/v1/chat/completions") {
             withAuth()
@@ -63,8 +48,6 @@ class OpenClawClient(private val baseUrl: String) {
             .jsonPrimitive.content
     }
 
-
-
     suspend fun getAgents(): List<Agent> {
         val config = getBootstrapConfig()
         return listOf(
@@ -81,3 +64,15 @@ class OpenClawClient(private val baseUrl: String) {
 
     fun close() = client.close()
 }
+
+@Serializable
+internal data class ChatRequest(
+    val model: String,
+    val messages: List<ChatMessage>
+)
+
+@Serializable
+internal data class ChatMessage(
+    val role: String,
+    val content: String
+)

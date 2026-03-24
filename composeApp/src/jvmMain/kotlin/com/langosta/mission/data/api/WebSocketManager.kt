@@ -9,10 +9,20 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.*
-import java.security.MessageDigest
 import java.util.UUID
-import kotlin.text.toByteArray
 
+/**
+ * Gestiona la conexión WebSocket al gateway OpenClaw.
+ *
+ * Protocolo real descubierto (issue #4):
+ *  1. Servidor envía: { event: "connect.challenge", payload: { nonce, ts } }
+ *  2. Cliente responde: { type: "req", method: "connect", params: { auth: { token }, ... } }
+ *  3. Servidor responde: { type: "res", ok: true } → conexión establecida
+ *
+ * FASE DE PRUEBA: se omite el campo "device" para verificar si el servidor
+ * acepta solo auth.token sin device auth (Opción A del issue #4).
+ * Si falla con DEVICE_AUTH_*, implementar keypair ECDSA P-256 (Opción B).
+ */
 class WebSocketManager(private val baseUrl: String) {
 
     private val client = HttpClient {
@@ -25,10 +35,7 @@ class WebSocketManager(private val baseUrl: String) {
     private val _connectionState = MutableSharedFlow<ConnectionState>()
     val connectionState = _connectionState.asSharedFlow()
 
-    private var deviceId: String = "langosta-probe-${UUID.randomUUID().toString().take(8)}"
-    private var wsDisabled: Boolean = true // Deshabilitado por defecto sin device auth
-    
-    private val devicePublicKey: String = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlivFI8qB4D0y2jy0CfEqFyy46R0o7S8TKpsx5xbHKoU1VWg6QkQm+ntyIv1p4kE1sPEQO73+HY8+Bzs75XwRTHLokBm9LCqJ3xrYSO9hT2j2r+5w4UQx1xpJ2Mc8pmB1xS2i3hVdP8bQv3N1w4TQT1S5k6fqQ6FQ2xwptF1Jc3FxJ4qM3a4V2U+89lF3a6C0bI+YDpGiFCYPr+9hAQ=="
+    private var wsDisabled: Boolean = false // Habilitado — probando sin device auth
 
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
@@ -37,130 +44,123 @@ class WebSocketManager(private val baseUrl: String) {
         data class Error(val message: String) : ConnectionState()
     }
 
-    private fun generateSignature(nonce: String, timestamp: Long): String {
-        val payload = "v3:$deviceId:$nonce:$timestamp"
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(payload.toByteArray())
-        return hash.joinToString("") { "%02x".format(it) }
-    }
-
     suspend fun connectWithRetry(path: String = "") {
         if (wsDisabled) {
-            AppLogger.w("WebSocketManager", "WebSocket disabled, skipping connection")
+            AppLogger.w("WebSocketManager", "WebSocket disabled")
             _connectionState.emit(ConnectionState.Disconnected)
             return
         }
-        
-        _connectionState.emit(ConnectionState.Disconnected)
-        
+
         val token = ConfigManager.getAuthToken()
         val host = baseUrl.substringBefore(":")
         val port = baseUrl.substringAfter(":").toIntOrNull() ?: 18789
 
-        AppLogger.i("WebSocketManager", "Connecting to $host:$port")
+        AppLogger.i("WebSocketManager", "Connecting to $host:$port (token-only auth)")
 
         try {
             _connectionState.emit(ConnectionState.Connecting)
             client.webSocket(host = host, port = port, path = path) {
                 AppLogger.i("WebSocketManager", "Waiting for challenge...")
 
+                // 1. Recibir challenge
                 val challengeFrame = incoming.receive()
-                if (challengeFrame is Frame.Text) {
-                    val challengeJson = Json.parseToJsonElement(challengeFrame.readText()).jsonObject
-                    val eventType = challengeJson["event"]?.jsonPrimitive?.content
-
-                    if (eventType == "connect.challenge") {
-                        val payload = challengeJson["payload"]?.jsonObject
-                        val nonce = payload?.get("nonce")?.jsonPrimitive?.content ?: ""
-                        val timestamp = payload?.get("ts")?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
-
-                        val signature = generateSignature(nonce, timestamp)
-
-                        val connectMessage = buildJsonObject {
-                            put("type", "req")
-                            put("id", "1")
-                            put("method", "connect")
-                            putJsonObject("params") {
-                                put("minProtocol", 3)
-                                put("maxProtocol", 3)
-                                putJsonObject("client") {
-                                    put("id", "openclaw-probe")
-                                    put("platform", "jvm")
-                                    put("mode", "probe")
-                                    put("version", "1.0.0")
-                                }
-                                put("role", "operator")
-                                putJsonArray("scopes") {
-                                    add("operator.read")
-                                    add("operator.write")
-                                }
-                                putJsonArray("caps") { }
-                                putJsonArray("commands") { }
-                                putJsonObject("permissions") { }
-                                putJsonObject("auth") {
-                                    put("token", token)
-                                }
-                                put("locale", "en-US")
-                                put("userAgent", "langosta-mission-control/1.0.0")
-                                putJsonObject("device") {
-                                    put("id", deviceId)
-                                    put("publicKey", devicePublicKey)
-                                    put("signature", signature)
-                                    put("signedAt", timestamp)
-                                    put("nonce", nonce)
-                                }
-                            }
-                        }.toString()
-
-                        AppLogger.i("WebSocketManager", "Sending connect: $connectMessage")
-                        send(Frame.Text(connectMessage))
-                    }
+                if (challengeFrame !is Frame.Text) {
+                    _connectionState.emit(ConnectionState.Error("Expected text frame for challenge"))
+                    return@webSocket
                 }
 
+                val challengeJson = Json.parseToJsonElement(challengeFrame.readText()).jsonObject
+                val eventType = challengeJson["event"]?.jsonPrimitive?.content
+
+                if (eventType != "connect.challenge") {
+                    AppLogger.w("WebSocketManager", "Unexpected first frame: $eventType")
+                    _connectionState.emit(ConnectionState.Error("Expected connect.challenge, got: $eventType"))
+                    return@webSocket
+                }
+
+                // 2. Enviar connect SIN device auth
+                val connectMessage = buildJsonObject {
+                    put("type", "req")
+                    put("id", UUID.randomUUID().toString())
+                    put("method", "connect")
+                    putJsonObject("params") {
+                        put("minProtocol", 3)
+                        put("maxProtocol", 3)
+                        putJsonObject("client") {
+                            put("id", "langosta-mission-control")
+                            put("platform", "jvm")
+                            put("mode", "probe")
+                            put("version", "1.0.0")
+                        }
+                        put("role", "operator")
+                        putJsonArray("scopes") {
+                            add("operator.read")
+                            add("operator.write")
+                        }
+                        putJsonArray("caps") { add("tool-events") }
+                        putJsonArray("commands") { }
+                        putJsonObject("permissions") { }
+                        putJsonObject("auth") {
+                            put("token", token)
+                        }
+                        put("locale", "es-419")
+                        put("userAgent", "langosta-mission-control/1.0.0")
+                        // device omitido intencionalmente — ver issue #4 Opción A
+                    }
+                }.toString()
+
+                AppLogger.i("WebSocketManager", "Sending connect (no device auth)")
+                send(Frame.Text(connectMessage))
+
+                // 3. Procesar respuestas y eventos
                 for (frame in incoming) {
-                    if (frame is Frame.Text) {
-                        val text = frame.readText()
-                        AppLogger.i("WebSocketManager", "Received: $text")
+                    if (frame !is Frame.Text) continue
+                    val text = frame.readText()
+                    AppLogger.d("WebSocketManager", "Received: ${text.take(200)}")
 
-                        val json = Json.parseToJsonElement(text).jsonObject
-                        val type = json["type"]?.jsonPrimitive?.content
+                    val json = try {
+                        Json.parseToJsonElement(text).jsonObject
+                    } catch (e: Exception) {
+                        AppLogger.w("WebSocketManager", "Invalid JSON: ${e.message}")
+                        continue
+                    }
 
-                        when (type) {
-                            "res" -> {
-                                val ok = json["ok"]?.jsonPrimitive?.boolean == true
-                                if (ok) {
-                                    _connectionState.emit(ConnectionState.Connected)
-                                    AppLogger.i("WebSocketManager", "Connected successfully!")
-                                } else {
-                                    val error = json["error"]?.jsonObject
-                                    val message = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
-                                    val details = error?.get("details")?.jsonObject
-                                    val detailCode = details?.get("code")?.jsonPrimitive?.content
-                                    
-                                    if (detailCode == "DEVICE_AUTH_DEVICE_ID_MISMATCH") {
-                                        AppLogger.w("WebSocketManager", "Device auth required - falling back to REST polling only")
+                    when (json["type"]?.jsonPrimitive?.content) {
+                        "res" -> {
+                            val ok = json["ok"]?.jsonPrimitive?.boolean == true
+                            if (ok) {
+                                _connectionState.emit(ConnectionState.Connected)
+                                AppLogger.i("WebSocketManager", "Connected! (token-only auth succeeded)")
+                            } else {
+                                val error = json["error"]?.jsonObject
+                                val message = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
+                                val code = error?.get("details")?.jsonObject
+                                    ?.get("code")?.jsonPrimitive?.content
+
+                                AppLogger.e("WebSocketManager", "Connect failed — code=$code message=$message")
+
+                                when (code) {
+                                    "DEVICE_AUTH_REQUIRED",
+                                    "DEVICE_AUTH_DEVICE_ID_MISMATCH" -> {
+                                        // Opción A fallida → necesita Opción B (keypair ECDSA)
+                                        // Ver issue #4
+                                        AppLogger.w("WebSocketManager", "Device auth required — disabling WS (implement keypair in issue #4)")
                                         wsDisabled = true
-                                        _connectionState.emit(ConnectionState.Disconnected)
-                                        return@webSocket
+                                        _connectionState.emit(ConnectionState.Error("Device auth required (ver issue #4)"))
                                     }
-                                    
-                                    _connectionState.emit(ConnectionState.Error(message))
-                                    AppLogger.e("WebSocketManager", "Connection failed: $message")
-                                    return@webSocket
+                                    else -> _connectionState.emit(ConnectionState.Error(message))
                                 }
-                            }
-                            "event" -> {
-                                _events.emit(text)
+                                return@webSocket
                             }
                         }
+                        "event" -> _events.emit(text)
                     }
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            AppLogger.w("WebSocketManager", "WebSocket unavailable - using REST polling only: ${e.message}")
-            wsDisabled = true
+            AppLogger.w("WebSocketManager", "WS error — falling back to REST polling: ${e.message}")
             _connectionState.emit(ConnectionState.Disconnected)
         }
     }

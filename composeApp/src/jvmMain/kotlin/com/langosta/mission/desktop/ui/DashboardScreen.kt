@@ -127,7 +127,7 @@ private fun KpiRow(data: DashboardState, wsState: String) {
         )
         KpiCard(
             icon = Icons.Filled.Shield,
-            label = "Auditoría 24h",
+            label = "Auditor\u00eda 24h",
             value = "${data.auditEvents24h}",
             subtitle = "${data.loginFailures24h} fallos login",
             color = if (data.loginFailures24h > 5) ColorWarning else MaterialTheme.colorScheme.primary,
@@ -178,7 +178,7 @@ private fun AgentRow(agent: AgentNode) {
         Column(horizontalAlignment = Alignment.End) {
             StatusChip(agent.status)
             Spacer(Modifier.height(2.dp))
-            Text("↑${formatTokens(agent.tokensIn)} ↓${formatTokens(agent.tokensOut)}",
+            Text("\u2191${formatTokens(agent.tokensIn)} \u2193${formatTokens(agent.tokensOut)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -190,7 +190,7 @@ private fun SessionsSection(data: DashboardState) {
     SectionCard(title = "Sesiones Recientes", icon = Icons.Filled.History, count = data.sessions.items.size) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             data.sessions.items.take(8).forEach { session ->
-                SessionRow(
+                DashSessionRow(
                     id = session.id.take(18),
                     model = session.model,
                     status = session.status,
@@ -203,7 +203,7 @@ private fun SessionsSection(data: DashboardState) {
 }
 
 @Composable
-private fun SessionRow(id: String, model: String, status: String, messages: Int, tokens: Long) {
+private fun DashSessionRow(id: String, model: String, status: String, messages: Int, tokens: Long) {
     Row(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
@@ -299,7 +299,7 @@ private fun CronSection(data: DashboardState) {
     }
 }
 
-// ── Componentes reutilizables ─────────────────────────────────────────────────────
+// ── Componentes privados ──────────────────────────────────────────────────────────
 
 @Composable
 private fun KpiCard(
@@ -391,20 +391,6 @@ private fun MiniMetric(label: String, value: String, modifier: Modifier, valueCo
 }
 
 @Composable
-fun StatusChip(status: String) {
-    val (bg, fg) = when (status.lowercase()) {
-        "active", "online", "running", "busy" -> Color(0xFF1B5E20) to ColorOnline
-        "idle", "scheduled"                   -> Color(0xFF263238) to Color(0xFF90A4AE)
-        "error", "failed"                     -> Color(0xFF7F0000) to Color(0xFFEF9A9A)
-        "disabled"                            -> Color(0xFF212121) to Color(0xFF757575)
-        else                                  -> Color(0xFF1A237E) to Color(0xFF90CAF9)
-    }
-    Box(modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(bg).padding(horizontal = 7.dp, vertical = 3.dp)) {
-        Text(status, style = MaterialTheme.typography.labelSmall, color = fg)
-    }
-}
-
-@Composable
 private fun EmptyState(text: String) {
     Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -426,11 +412,6 @@ private fun progressColor(percent: Int) = when {
     percent >= 90 -> ColorError
     percent >= 70 -> ColorWarning
     else          -> ColorOnline
-}
-fun formatTokens(n: Long): String = when {
-    n >= 1_000_000 -> "${"%.1f".format(n / 1_000_000.0)}M"
-    n >= 1_000     -> "${"%.1f".format(n / 1_000.0)}K"
-    else           -> "$n"
 }
 private fun formatUptime(seconds: Long): String {
     val h = seconds / 3600; val m = (seconds % 3600) / 60

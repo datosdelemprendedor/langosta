@@ -2,6 +2,7 @@ package com.langosta.mission.util
 
 import kotlinx.serialization.json.*
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
@@ -28,34 +29,33 @@ object ConfigManager {
     }
 
     /**
-     * Lee ~/.openclaw/openclaw.json via WSL y extrae:
-     * - gateway.auth.token -> api_token
-     * - gateway.port       -> server_url / ws_url
-     *
-     * Se lee via WSL porque la app corre en Windows/JVM pero
-     * openclaw vive en el filesystem de WSL.
+     * Lee ~/.openclaw/openclaw.json.
+     * Estrategia:
+     *   1. Acceso directo al filesystem (Linux/Debian o cualquier POSIX)
+     *   2. Fallback: via WSL (cuando la app corre en Windows/JVM)
      */
     private fun loadFromOpenClawJson() {
-        try {
-            val raw = readFileViaWsl("~/.openclaw/openclaw.json")
-            if (raw == null) {
-                AppLogger.w("ConfigManager", "openclaw.json not found in WSL")
-                setDefaults()
-                return
-            }
+        val raw = readFileDirect() ?: readFileViaWsl("~/.openclaw/openclaw.json")
+        if (raw == null) {
+            AppLogger.w("ConfigManager", "openclaw.json no encontrado (directo ni WSL)")
+            setDefaults()
+            return
+        }
+        parseOpenClawJson(raw)
+    }
 
+    private fun parseOpenClawJson(raw: String) {
+        try {
             val json = Json.parseToJsonElement(raw).jsonObject
 
-            // Token: gateway.auth.token
             val token = json["gateway"]?.jsonObject
                 ?.get("auth")?.jsonObject
                 ?.get("token")?.jsonPrimitive?.content
             if (!token.isNullOrEmpty()) {
                 set("api_token", token)
-                AppLogger.i("ConfigManager", "Token loaded from openclaw.json")
+                AppLogger.i("ConfigManager", "Token cargado desde openclaw.json")
             }
 
-            // Puerto: gateway.port
             val port = json["gateway"]?.jsonObject
                 ?.get("port")?.jsonPrimitive?.intOrNull
             if (port != null) {
@@ -65,19 +65,27 @@ object ConfigManager {
             } else {
                 setDefaults()
             }
-
         } catch (e: Exception) {
-            AppLogger.w("ConfigManager", "Could not read openclaw.json: ${e.message}")
+            AppLogger.w("ConfigManager", "Error parseando openclaw.json: ${e.message}")
             setDefaults()
         }
     }
 
-    private fun setDefaults() {
-        set("server_url", "http://127.0.0.1:18789")
-        set("ws_url", "127.0.0.1:18789")
+    /** Lectura directa (Linux/Debian/macOS) */
+    private fun readFileDirect(): String? {
+        return try {
+            val home = System.getProperty("user.home") ?: return null
+            val file = File(home, ".openclaw/openclaw.json")
+            if (file.exists() && file.canRead()) {
+                AppLogger.i("ConfigManager", "Leyendo openclaw.json directamente: ${file.absolutePath}")
+                file.readText().trim().ifBlank { null }
+            } else null
+        } catch (e: Exception) {
+            null
+        }
     }
 
-    /** Lee un archivo del filesystem de WSL y retorna su contenido como String */
+    /** Lectura via WSL (Windows/JVM con Ubuntu WSL) */
     private fun readFileViaWsl(path: String): String? {
         return try {
             val process = ProcessBuilder(
@@ -90,8 +98,13 @@ object ConfigManager {
             process.waitFor(5, TimeUnit.SECONDS)
             output.trim().ifBlank { null }
         } catch (e: Exception) {
-            AppLogger.w("ConfigManager", "readFileViaWsl failed: ${e.message}")
+            AppLogger.w("ConfigManager", "readFileViaWsl fallido: ${e.message}")
             null
         }
+    }
+
+    private fun setDefaults() {
+        set("server_url", "http://127.0.0.1:18789")
+        set("ws_url", "127.0.0.1:18789")
     }
 }

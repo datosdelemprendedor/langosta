@@ -2,14 +2,12 @@ package com.langosta.mission.desktop
 
 import com.langosta.mission.data.TaskHistoryDatabase
 import com.langosta.mission.data.TaskHistoryEntry
-import com.langosta.mission.data.api.OpenClawClient
 import com.langosta.mission.data.api.OpenClawGatewayClient
 import com.langosta.mission.data.repository.TaskRepository
 import com.langosta.mission.domain.model.Agent
 import com.langosta.mission.domain.model.Task
 import com.langosta.mission.domain.model.TaskStatus
 import com.langosta.mission.util.AppLogger
-import com.langosta.mission.util.ConfigManager
 import com.langosta.mission.util.NotificationManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,42 +55,37 @@ class TaskViewModel(private val repository: TaskRepository) {
     }
 
     /**
-     * Intenta conectar via CLI gateway primero.
-     * Si falla (gateway no disponible), intenta HTTP como fallback.
+     * Verifica conexión via CLI gateway. No usa OpenClawClient (HTTP) para evitar
+     * SerializationException en JVM con getBootstrapConfig.
      */
     suspend fun testConnection(): Boolean {
-        // 1. Intento via CLI (gateway local)
         return try {
             val gatewayClient = OpenClawGatewayClient()
             val health = gatewayClient.health()
-            val ok = health.status == "online"
-            _serverStatus.value = ok
-            AppLogger.i("TaskViewModel", "Gateway CLI health: ${health.status}")
-            if (ok) return true
-            // Si el gateway responde pero está offline, igual conectamos (puede ser momentáneo)
+            _serverStatus.value = health.status == "online"
+            AppLogger.i("TaskViewModel", "Gateway health: ${health.status}")
             true
         } catch (e: Exception) {
-            AppLogger.w("TaskViewModel", "Gateway CLI failed, trying HTTP: ${e.message}")
-            // 2. Fallback HTTP
-            try {
-                val client = OpenClawClient(ConfigManager.getServerUrl())
-                client.ping()
-                _serverStatus.value = true
-                true
-            } catch (e2: Exception) {
-                AppLogger.e("TaskViewModel", "HTTP fallback also failed: ${e2.message}")
-                _serverStatus.value = false
-                false
-            }
+            AppLogger.w("TaskViewModel", "Connection failed: ${e.message}")
+            _serverStatus.value = false
+            false
         }
     }
 
     fun fetchAgents() {
         scope.launch {
             try {
-                val client = OpenClawClient(ConfigManager.getServerUrl())
-                _agents.value = client.getAgents()
-                AppLogger.i("TaskViewModel", "Agents loaded")
+                val gatewayClient = OpenClawGatewayClient()
+                val config = gatewayClient.getBootstrapConfig()
+                _agents.value = listOf(
+                    Agent(
+                        id = config.assistantAgentId,
+                        name = config.assistantName,
+                        model = "openclaw",
+                        isOnline = true
+                    )
+                )
+                AppLogger.i("TaskViewModel", "Agents loaded: ${_agents.value.size}")
             } catch (e: Exception) {
                 AppLogger.e("TaskViewModel", "Error fetching agents", e)
             }
@@ -149,17 +142,21 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
+    /**
+     * Auto-refresh: solo actualiza serverStatus via CLI gateway.
+     * NO usa OpenClawClient.getAgents() para evitar SerializationException.
+     */
     fun startAutoRefresh() {
         scope.launch {
             while (true) {
                 delay(5000)
                 try {
-                    val client = OpenClawClient(ConfigManager.getServerUrl())
-                    _agents.value = client.getAgents()
-                    _serverStatus.value = true
+                    val gatewayClient = OpenClawGatewayClient()
+                    val health = gatewayClient.health()
+                    _serverStatus.value = health.status == "online"
                 } catch (e: Exception) {
                     _serverStatus.value = false
-                    AppLogger.e("TaskViewModel", "Auto-refresh error", e)
+                    AppLogger.w("TaskViewModel", "Auto-refresh: gateway unreachable")
                 }
             }
         }

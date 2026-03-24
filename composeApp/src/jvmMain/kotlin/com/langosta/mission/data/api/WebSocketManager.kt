@@ -14,14 +14,12 @@ import java.util.UUID
 /**
  * Gestiona la conexión WebSocket al gateway OpenClaw.
  *
- * Protocolo real descubierto (issue #4):
+ * Protocolo (issue #4):
  *  1. Servidor envía: { event: "connect.challenge", payload: { nonce, ts } }
- *  2. Cliente responde: { type: "req", method: "connect", params: { auth: { token }, ... } }
- *  3. Servidor responde: { type: "res", ok: true } → conexión establecida
+ *  2. Cliente responde: { type: "req", method: "connect", params: { auth: { token }, client: { id: "openclaw-control-ui", ... } } }
+ *  3. Servidor responde: { type: "res", ok: true }
  *
- * FASE DE PRUEBA: se omite el campo "device" para verificar si el servidor
- * acepta solo auth.token sin device auth (Opción A del issue #4).
- * Si falla con DEVICE_AUTH_*, implementar keypair ECDSA P-256 (Opción B).
+ * IMPORTANTE: client.id DEBE ser "openclaw-control-ui" (valor constante que el servidor valida).
  */
 class WebSocketManager(private val baseUrl: String) {
 
@@ -35,7 +33,7 @@ class WebSocketManager(private val baseUrl: String) {
     private val _connectionState = MutableSharedFlow<ConnectionState>()
     val connectionState = _connectionState.asSharedFlow()
 
-    private var wsDisabled: Boolean = false // Habilitado — probando sin device auth
+    private var wsDisabled: Boolean = false
 
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
@@ -55,30 +53,25 @@ class WebSocketManager(private val baseUrl: String) {
         val host = baseUrl.substringBefore(":")
         val port = baseUrl.substringAfter(":").toIntOrNull() ?: 18789
 
-        AppLogger.i("WebSocketManager", "Connecting to $host:$port (token-only auth)")
+        AppLogger.i("WebSocketManager", "Connecting to $host:$port")
 
         try {
             _connectionState.emit(ConnectionState.Connecting)
             client.webSocket(host = host, port = port, path = path) {
-                AppLogger.i("WebSocketManager", "Waiting for challenge...")
-
                 // 1. Recibir challenge
                 val challengeFrame = incoming.receive()
                 if (challengeFrame !is Frame.Text) {
-                    _connectionState.emit(ConnectionState.Error("Expected text frame for challenge"))
+                    _connectionState.emit(ConnectionState.Error("Expected text frame"))
                     return@webSocket
                 }
 
                 val challengeJson = Json.parseToJsonElement(challengeFrame.readText()).jsonObject
-                val eventType = challengeJson["event"]?.jsonPrimitive?.content
-
-                if (eventType != "connect.challenge") {
-                    AppLogger.w("WebSocketManager", "Unexpected first frame: $eventType")
-                    _connectionState.emit(ConnectionState.Error("Expected connect.challenge, got: $eventType"))
+                if (challengeJson["event"]?.jsonPrimitive?.content != "connect.challenge") {
+                    _connectionState.emit(ConnectionState.Error("Expected connect.challenge"))
                     return@webSocket
                 }
 
-                // 2. Enviar connect SIN device auth
+                // 2. Responder con connect — client.id debe ser "openclaw-control-ui" (constante del servidor)
                 val connectMessage = buildJsonObject {
                     put("type", "req")
                     put("id", UUID.randomUUID().toString())
@@ -87,15 +80,17 @@ class WebSocketManager(private val baseUrl: String) {
                         put("minProtocol", 3)
                         put("maxProtocol", 3)
                         putJsonObject("client") {
-                            put("id", "langosta-mission-control")
-                            put("platform", "jvm")
-                            put("mode", "probe")
-                            put("version", "1.0.0")
+                            put("id", "openclaw-control-ui")  // valor constante requerido por el servidor
+                            put("platform", "Win32")
+                            put("mode", "webchat")
+                            put("version", "control-ui")
+                            put("instanceId", UUID.randomUUID().toString())
                         }
                         put("role", "operator")
                         putJsonArray("scopes") {
                             add("operator.read")
                             add("operator.write")
+                            add("operator.admin")
                         }
                         putJsonArray("caps") { add("tool-events") }
                         putJsonArray("commands") { }
@@ -105,51 +100,45 @@ class WebSocketManager(private val baseUrl: String) {
                         }
                         put("locale", "es-419")
                         put("userAgent", "langosta-mission-control/1.0.0")
-                        // device omitido intencionalmente — ver issue #4 Opción A
+                        // device omitido — Opción A (issue #4)
                     }
                 }.toString()
 
-                AppLogger.i("WebSocketManager", "Sending connect (no device auth)")
+                AppLogger.i("WebSocketManager", "Sending connect (client.id=openclaw-control-ui, no device auth)")
                 send(Frame.Text(connectMessage))
 
-                // 3. Procesar respuestas y eventos
+                // 3. Procesar respuestas
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
                     val text = frame.readText()
-                    AppLogger.d("WebSocketManager", "Received: ${text.take(200)}")
+                    AppLogger.d("WebSocketManager", "Received: ${text.take(300)}")
 
                     val json = try {
                         Json.parseToJsonElement(text).jsonObject
-                    } catch (e: Exception) {
-                        AppLogger.w("WebSocketManager", "Invalid JSON: ${e.message}")
-                        continue
-                    }
+                    } catch (e: Exception) { continue }
 
                     when (json["type"]?.jsonPrimitive?.content) {
                         "res" -> {
-                            val ok = json["ok"]?.jsonPrimitive?.boolean == true
-                            if (ok) {
+                            if (json["ok"]?.jsonPrimitive?.boolean == true) {
                                 _connectionState.emit(ConnectionState.Connected)
-                                AppLogger.i("WebSocketManager", "Connected! (token-only auth succeeded)")
+                                AppLogger.i("WebSocketManager", "WS Connected!")
                             } else {
                                 val error = json["error"]?.jsonObject
-                                val message = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
+                                val message = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
                                 val code = error?.get("details")?.jsonObject
                                     ?.get("code")?.jsonPrimitive?.content
+                                    ?: error?.get("code")?.jsonPrimitive?.content
 
                                 AppLogger.e("WebSocketManager", "Connect failed — code=$code message=$message")
 
                                 when (code) {
                                     "DEVICE_AUTH_REQUIRED",
                                     "DEVICE_AUTH_DEVICE_ID_MISMATCH" -> {
-                                        // Opción A fallida → necesita Opción B (keypair ECDSA)
-                                        // Ver issue #4
-                                        AppLogger.w("WebSocketManager", "Device auth required — disabling WS (implement keypair in issue #4)")
+                                        AppLogger.w("WebSocketManager", "Device auth required — implement keypair ECDSA (issue #4 Opción B)")
                                         wsDisabled = true
-                                        _connectionState.emit(ConnectionState.Error("Device auth required (ver issue #4)"))
                                     }
-                                    else -> _connectionState.emit(ConnectionState.Error(message))
                                 }
+                                _connectionState.emit(ConnectionState.Error(message))
                                 return@webSocket
                             }
                         }
@@ -160,7 +149,7 @@ class WebSocketManager(private val baseUrl: String) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            AppLogger.w("WebSocketManager", "WS error — falling back to REST polling: ${e.message}")
+            AppLogger.w("WebSocketManager", "WS unavailable — REST polling only: ${e.message}")
             _connectionState.emit(ConnectionState.Disconnected)
         }
     }

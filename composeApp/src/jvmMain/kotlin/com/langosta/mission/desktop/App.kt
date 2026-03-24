@@ -78,25 +78,17 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
 
                         currentDestination == AppDestination.SESSIONS ||
                         currentDestination == AppDestination.SESSIONS_LIST ->
-                            ComingSoonScreen(
-                                title = "💬 Sesiones",
-                                description = "Sesiones activas de agentes con el gateway.",
-                                modifier = Modifier.weight(1f)
-                            )
+                            SessionsScreen(modifier = Modifier.weight(1f))
+
+                        currentDestination == AppDestination.CRON ||
+                        currentDestination == AppDestination.CRON_LIST ->
+                            CronScreen(modifier = Modifier.weight(1f))
 
                         currentDestination == AppDestination.MEMORY ||
                         currentDestination == AppDestination.MEMORY_LIST ->
                             ComingSoonScreen(
                                 title = "🧠 Memoria",
                                 description = "Entradas de memoria persistente de los agentes.",
-                                modifier = Modifier.weight(1f)
-                            )
-
-                        currentDestination == AppDestination.CRON ||
-                        currentDestination == AppDestination.CRON_LIST ->
-                            ComingSoonScreen(
-                                title = "⏰ Cron Jobs",
-                                description = "Tareas programadas que ejecutan agentes automáticamente.",
                                 modifier = Modifier.weight(1f)
                             )
 

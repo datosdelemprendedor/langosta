@@ -10,28 +10,21 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.*
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.Signature
-import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
 import java.util.UUID
 
 /**
- * Gestiona la conexión WebSocket al gateway OpenClaw.
+ * Gestiona la conexion WebSocket al gateway OpenClaw.
  *
- * Protocolo (issue #4 — Opción B):
- *  1. Servidor envía: { event: "connect.challenge", payload: { nonce, ts } }
- *  2. Cliente responde: { type: "req", method: "connect", params: {
- *       auth: { token },
- *       client: { id: "openclaw-control-ui", ... },
- *       device: { id, publicKey, signature, signedAt, nonce }
- *     }}
- *  3. Servidor responde: { type: "res", ok: true }
- *
- * Device identity: keypair ECDSA P-256 generado una vez por instancia.
- * El deviceId se deriva del hash SHA-256 de la clave pública (igual que el browser).
+ * Device identity (issue #4):
+ *  - Prioritario: reutilizar el device ya pareado en ~/.openclaw/devices/paired.json
+ *  - Fallback: generar keypair ECDSA P-256 nuevo (requiere aprobacion en el gateway)
  */
 class WebSocketManager(private val baseUrl: String) {
 
@@ -47,23 +40,6 @@ class WebSocketManager(private val baseUrl: String) {
 
     private var wsDisabled: Boolean = false
 
-    // Keypair ECDSA P-256 — generado una vez, persistente por instancia
-    private val keyPair = KeyPairGenerator.getInstance("EC").apply {
-        initialize(ECGenParameterSpec("secp256r1"))
-    }.generateKeyPair()
-
-    // deviceId = primeros 16 chars del SHA-256 hex de la clave pública DER
-    private val deviceId: String by lazy {
-        val pubKeyBytes = keyPair.public.encoded
-        val hash = MessageDigest.getInstance("SHA-256").digest(pubKeyBytes)
-        hash.joinToString("") { "%02x".format(it) }.take(16)
-    }
-
-    // Clave pública en formato Base64 (DER encoded)
-    private val publicKeyBase64: String by lazy {
-        Base64.getEncoder().encodeToString(keyPair.public.encoded)
-    }
-
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
         object Connecting : ConnectionState()
@@ -72,16 +48,56 @@ class WebSocketManager(private val baseUrl: String) {
     }
 
     /**
-     * Firma el payload con ECDSA SHA-256.
-     * payload = "v3:<deviceId>:<nonce>:<timestamp>"
-     * Devuelve la firma en Base64.
+     * Firma el payload con la private key del device pareado (PKCS8 Base64)
+     * o con un keypair generado en memoria si no hay device pareado.
      */
-    private fun signPayload(nonce: String, timestamp: Long): String {
+    private fun buildDeviceIdentity(nonce: String, timestamp: Long): Triple<String, String, String> {
+        // Intentar usar el device pareado
+        if (ConfigManager.hasPairedDevice()) {
+            val deviceId = ConfigManager.getPairedDeviceId()
+            val privKeyB64 = ConfigManager.getPairedPrivateKey()
+            val pubKeyB64 = ConfigManager.getPairedPublicKey()
+
+            return try {
+                val privKeyBytes = Base64.getDecoder().decode(privKeyB64)
+                val privKey = KeyFactory.getInstance("EC")
+                    .generatePrivate(PKCS8EncodedKeySpec(privKeyBytes))
+
+                val payload = "v3:$deviceId:$nonce:$timestamp"
+                val sig = Signature.getInstance("SHA256withECDSA")
+                sig.initSign(privKey)
+                sig.update(payload.toByteArray(Charsets.UTF_8))
+                val signature = Base64.getEncoder().encodeToString(sig.sign())
+
+                AppLogger.i("WebSocketManager", "Usando device pareado: id=$deviceId")
+                Triple(deviceId, pubKeyB64, signature)
+            } catch (e: Exception) {
+                AppLogger.w("WebSocketManager", "Error usando paired key: ${e.message} — generando keypair nuevo")
+                generateFreshIdentity(nonce, timestamp)
+            }
+        }
+
+        AppLogger.w("WebSocketManager", "No hay device pareado, generando keypair nuevo (requiere aprobacion)")
+        return generateFreshIdentity(nonce, timestamp)
+    }
+
+    private fun generateFreshIdentity(nonce: String, timestamp: Long): Triple<String, String, String> {
+        val kp = KeyPairGenerator.getInstance("EC").apply {
+            initialize(ECGenParameterSpec("secp256r1"))
+        }.generateKeyPair()
+
+        val pubBytes = kp.public.encoded
+        val deviceId = MessageDigest.getInstance("SHA-256").digest(pubBytes)
+            .joinToString("") { "%02x".format(it) }.take(16)
+        val pubKeyB64 = Base64.getEncoder().encodeToString(pubBytes)
+
         val payload = "v3:$deviceId:$nonce:$timestamp"
         val sig = Signature.getInstance("SHA256withECDSA")
-        sig.initSign(keyPair.private)
+        sig.initSign(kp.private)
         sig.update(payload.toByteArray(Charsets.UTF_8))
-        return Base64.getEncoder().encodeToString(sig.sign())
+        val signature = Base64.getEncoder().encodeToString(sig.sign())
+
+        return Triple(deviceId, pubKeyB64, signature)
     }
 
     suspend fun connectWithRetry(path: String = "") {
@@ -97,7 +113,7 @@ class WebSocketManager(private val baseUrl: String) {
         val port = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
         val origin = "http://$host:$port"
 
-        AppLogger.i("WebSocketManager", "Connecting to $host:$port | deviceId=$deviceId")
+        AppLogger.i("WebSocketManager", "Connecting to $host:$port")
 
         try {
             _connectionState.emit(ConnectionState.Connecting)
@@ -116,7 +132,6 @@ class WebSocketManager(private val baseUrl: String) {
                     _connectionState.emit(ConnectionState.Error("Expected text frame"))
                     return@webSocket
                 }
-
                 val challengeJson = Json.parseToJsonElement(challengeFrame.readText()).jsonObject
                 if (challengeJson["event"]?.jsonPrimitive?.content != "connect.challenge") {
                     _connectionState.emit(ConnectionState.Error("Expected connect.challenge"))
@@ -127,8 +142,8 @@ class WebSocketManager(private val baseUrl: String) {
                 val nonce = payload?.get("nonce")?.jsonPrimitive?.content ?: UUID.randomUUID().toString()
                 val timestamp = payload?.get("ts")?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
 
-                // 2. Firmar y enviar connect con device identity
-                val signature = signPayload(nonce, timestamp)
+                // 2. Construir device identity y firmar
+                val (deviceId, publicKey, signature) = buildDeviceIdentity(nonce, timestamp)
 
                 val connectMessage = buildJsonObject {
                     put("type", "req")
@@ -155,14 +170,12 @@ class WebSocketManager(private val baseUrl: String) {
                         putJsonArray("caps") { add("tool-events") }
                         putJsonArray("commands") { }
                         putJsonObject("permissions") { }
-                        putJsonObject("auth") {
-                            put("token", token)
-                        }
+                        putJsonObject("auth") { put("token", token) }
                         put("locale", "es-419")
                         put("userAgent", "langosta-mission-control/1.0.0")
                         putJsonObject("device") {
                             put("id", deviceId)
-                            put("publicKey", publicKeyBase64)
+                            put("publicKey", publicKey)
                             put("signature", signature)
                             put("signedAt", timestamp)
                             put("nonce", nonce)
@@ -170,7 +183,7 @@ class WebSocketManager(private val baseUrl: String) {
                     }
                 }.toString()
 
-                AppLogger.i("WebSocketManager", "Sending connect with ECDSA device identity")
+                AppLogger.i("WebSocketManager", "Sending connect | deviceId=$deviceId")
                 send(Frame.Text(connectMessage))
 
                 // 3. Procesar respuestas y eventos
@@ -187,7 +200,7 @@ class WebSocketManager(private val baseUrl: String) {
                         "res" -> {
                             if (json["ok"]?.jsonPrimitive?.boolean == true) {
                                 _connectionState.emit(ConnectionState.Connected)
-                                AppLogger.i("WebSocketManager", "WS Connected! (ECDSA device auth OK)")
+                                AppLogger.i("WebSocketManager", "WS Connected!")
                             } else {
                                 val error = json["error"]?.jsonObject
                                 val message = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"

@@ -74,11 +74,7 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
 
                         currentDestination == AppDestination.CHANNELS ||
                         currentDestination == AppDestination.CHANNELS_LIST ->
-                            ComingSoonScreen(
-                                title = "📡 Channels",
-                                description = "Configura canales de entrada: WhatsApp, Telegram, webhooks.",
-                                modifier = Modifier.weight(1f)
-                            )
+                            ChannelsScreen(modifier = Modifier.weight(1f))
 
                         currentDestination == AppDestination.SESSIONS ||
                         currentDestination == AppDestination.SESSIONS_LIST ->

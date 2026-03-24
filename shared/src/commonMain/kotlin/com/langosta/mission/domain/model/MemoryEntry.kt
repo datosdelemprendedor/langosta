@@ -2,7 +2,7 @@ package com.langosta.mission.domain.model
 
 import kotlinx.serialization.Serializable
 
-/** Entrada de MEMORY.md de un agente (viene de /api/memory?agentMemory=<id>) */
+// Memoria de un agente: viene de /api/memory?agentMemory=<agentId>
 @Serializable
 data class AgentMemoryFile(
     val agentId: String,
@@ -14,13 +14,13 @@ data class AgentMemoryFile(
     val words: Int = 0,
     val size: Long = 0L,
     val mtime: String? = null,
-    val vectorState: String = "unknown",  // indexed | stale | not_indexed | unknown
+    val vectorState: String = "unknown", // indexed | stale | not_indexed | unknown
     val dirty: Boolean = false,
     val indexedFiles: Int = 0,
     val indexedChunks: Int = 0
 )
 
-/** Archivo de diario diario (memory/*.md) */
+// Archivo de diario diario (memory/*.md)
 @Serializable
 data class MemoryJournalFile(
     val name: String,

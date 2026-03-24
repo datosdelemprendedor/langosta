@@ -10,14 +10,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.*
-import org.bouncycastle.jce.ECNamedCurveTable
-import org.bouncycastle.jce.provider.BouncyCastleProvider
-import org.bouncycastle.jce.spec.ECNamedCurveSpec
-import java.math.BigInteger
 import java.security.KeyFactory
-import java.security.Security
 import java.security.Signature
-import java.security.spec.ECPrivateKeySpec
+import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
 import java.util.UUID
 
@@ -25,14 +20,10 @@ import java.util.UUID
  * WebSocket al gateway OpenClaw con device identity ECDSA P-256.
  *
  * La private key del browser es raw Base64url (32 bytes = scalar D).
- * Java genera firmas ECDSA en DER (ASN.1), pero WebCrypto espera IEEE P1363 (r||s, 64 bytes).
- * -> Se convierte DER -> P1363 antes de enviar.
+ * Se envuelve en PKCS8 manualmente (igual que hace el browser internamente).
+ * La firma se produce en IEEE P1363 (r||s, 64 bytes) via SHA256withECDSAinP1363Format.
  */
 class WebSocketManager(private val baseUrl: String) {
-
-    init {
-        if (Security.getProvider("BC") == null) Security.addProvider(BouncyCastleProvider())
-    }
 
     private val client = HttpClient { install(WebSockets) }
 
@@ -50,34 +41,40 @@ class WebSocketManager(private val baseUrl: String) {
     }
 
     /**
-     * Convierte firma ECDSA de DER (ASN.1) a IEEE P1363 (r||s concatenados, 64 bytes).
-     * WebCrypto.verify() espera P1363, Java produce DER.
+     * Envuelve 32 bytes raw (scalar D de P-256) en un PKCS8 DER mínimo.
+     * Estructura idéntica a la que usa WebCrypto internamente.
      *
-     * DER layout: 0x30 <len> 0x02 <rLen> <r> 0x02 <sLen> <s>
+     * SEQUENCE {
+     *   INTEGER 0  (version)
+     *   SEQUENCE { OID ecPublicKey, OID P-256 }
+     *   OCTET STRING {
+     *     SEQUENCE {
+     *       INTEGER 1  (ECPrivateKey version)
+     *       OCTET STRING <32 bytes d>
+     *     }
+     *   }
+     * }
      */
-    private fun derToP1363(der: ByteArray): ByteArray {
-        var offset = 2                          // saltar 0x30 <totalLen>
-        if (der[1].toInt() and 0xff == 0x81) offset = 3  // len > 127
-        offset++                                // saltar 0x02
-        val rLen = der[offset++].toInt() and 0xff
-        val r = der.copyOfRange(offset, offset + rLen)
-        offset += rLen
-        offset++                                // saltar 0x02
-        val sLen = der[offset++].toInt() and 0xff
-        val s = der.copyOfRange(offset, offset + sLen)
-
-        // Normalizar r y s a 32 bytes (quitar byte 0x00 de padding o rellenar con 0)
-        fun normalize(bytes: ByteArray): ByteArray {
-            val trimmed = bytes.dropWhile { it == 0.toByte() }.toByteArray()
-            return if (trimmed.size == 32) trimmed
-            else ByteArray(32 - trimmed.size) + trimmed
-        }
-        return normalize(r) + normalize(s)
+    private fun wrapRawKeyAsPkcs8(rawD: ByteArray): ByteArray {
+        require(rawD.size == 32) { "EC P-256 private key debe ser 32 bytes, got ${rawD.size}" }
+        return byteArrayOf(
+            0x30, 0x41,                                     // SEQUENCE (65 bytes)
+            0x02, 0x01, 0x00,                               // INTEGER version=0
+            0x30, 0x13,                                     // SEQUENCE AlgorithmIdentifier
+              0x06, 0x07, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x02, 0x01, // OID ecPublicKey
+              0x06, 0x08, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x03, 0x01, 0x07, // OID P-256
+            0x04, 0x27,                                     // OCTET STRING (39 bytes)
+              0x30, 0x25,                                   // SEQUENCE ECPrivateKey
+                0x02, 0x01, 0x01,                           // INTEGER version=1
+                0x04, 0x20                                  // OCTET STRING (32 bytes)
+        ) + rawD
     }
 
     /**
      * Firma el payload con la raw private key P-256 del browser.
-     * Devuelve la firma en Base64url (formato que usa WebCrypto).
+     * Usa SHA256withECDSAinP1363Format para producir r||s (64 bytes) directamente,
+     * igual que WebCrypto.sign({ name:'ECDSA', hash:'SHA-256' }).
+     * Devuelve Base64url sin padding.
      */
     private fun signWithRawKey(privateKeyB64url: String, deviceId: String, nonce: String, timestamp: Long): String {
         val padded = privateKeyB64url
@@ -85,29 +82,25 @@ class WebSocketManager(private val baseUrl: String) {
             .let { it + "=".repeat((4 - it.length % 4) % 4) }
         val rawBytes = Base64.getDecoder().decode(padded)
 
-        val curveParams = ECNamedCurveTable.getParameterSpec("secp256r1")
-        val curveSpec   = ECNamedCurveSpec("secp256r1", curveParams.curve, curveParams.g, curveParams.n)
-        val privKey     = KeyFactory.getInstance("EC", "BC")
-            .generatePrivate(ECPrivateKeySpec(BigInteger(1, rawBytes), curveSpec))
+        val pkcs8 = wrapRawKeyAsPkcs8(rawBytes)
+        val privKey = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(pkcs8))
 
         val payload = "v3:$deviceId:$nonce:$timestamp"
-        val sig = Signature.getInstance("SHA256withECDSA", "BC")
+        // P1363Format produce r||s directamente (sin conversion DER)
+        val sig = Signature.getInstance("SHA256withECDSAinP1363Format")
         sig.initSign(privKey)
         sig.update(payload.toByteArray(Charsets.UTF_8))
-        val derBytes = sig.sign()
+        val sigBytes = sig.sign()
 
-        // Convertir DER -> P1363 (r||s) que es lo que valida el servidor (WebCrypto)
-        val p1363 = derToP1363(derBytes)
-        // Devolver en Base64url sin padding (igual que WebCrypto)
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(p1363)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(sigBytes)
     }
 
     suspend fun connectWithRetry(path: String = "") {
-        val token    = ConfigManager.getAuthToken()
+        val token     = ConfigManager.getAuthToken()
         val serverUrl = ConfigManager.getServerUrl()
-        val host     = serverUrl.removePrefix("http://").removePrefix("https://").substringBefore(":")
-        val port     = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
-        val origin   = "http://$host:$port"
+        val host      = serverUrl.removePrefix("http://").removePrefix("https://").substringBefore(":")
+        val port      = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
+        val origin    = "http://$host:$port"
 
         if (!ConfigManager.hasPairedDevice()) {
             AppLogger.e("WebSocketManager", "No hay device identity. Crea ~/.openclaw/device-identity.json")
@@ -180,7 +173,7 @@ class WebSocketManager(private val baseUrl: String) {
                     }
                 }.toString()
 
-                AppLogger.i("WebSocketManager", "Sending connect (P1363 signature)")
+                AppLogger.i("WebSocketManager", "Sending connect (PKCS8+P1363 signature)")
                 send(Frame.Text(msg))
 
                 // 3. Eventos
@@ -195,9 +188,9 @@ class WebSocketManager(private val baseUrl: String) {
                                 _connectionState.emit(ConnectionState.Connected)
                                 AppLogger.i("WebSocketManager", "WS Connected!")
                             } else {
-                                val error = json["error"]?.jsonObject
-                                val errMsg  = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
-                                val code  = error?.get("details")?.jsonObject?.get("code")?.jsonPrimitive?.content
+                                val error  = json["error"]?.jsonObject
+                                val errMsg = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
+                                val code   = error?.get("details")?.jsonObject?.get("code")?.jsonPrimitive?.content
                                     ?: error?.get("code")?.jsonPrimitive?.content
                                 AppLogger.e("WebSocketManager", "Connect failed — code=$code msg=$errMsg")
                                 _connectionState.emit(ConnectionState.Error(errMsg))

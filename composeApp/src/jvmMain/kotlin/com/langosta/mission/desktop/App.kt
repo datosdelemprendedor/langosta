@@ -35,7 +35,7 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
                         selected = currentDestination,
                         onSelect = {
                             currentDestination = it
-                            selectedAgent = null  // limpiar agente seleccionado al cambiar sección
+                            selectedAgent = null
                         },
                         isConnected = isConnected
                     )
@@ -43,7 +43,6 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
                     VerticalDivider()
 
                     when {
-                        // SkillsScreen: se muestra cuando hay un agente seleccionado
                         selectedAgent != null ->
                             SkillsScreen(
                                 agent = selectedAgent!!,
@@ -73,6 +72,38 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
                                 modifier = Modifier.weight(1f)
                             )
 
+                        currentDestination == AppDestination.CHANNELS ||
+                        currentDestination == AppDestination.CHANNELS_LIST ->
+                            ComingSoonScreen(
+                                title = "📡 Channels",
+                                description = "Configura canales de entrada: WhatsApp, Telegram, webhooks.",
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.SESSIONS ||
+                        currentDestination == AppDestination.SESSIONS_LIST ->
+                            ComingSoonScreen(
+                                title = "💬 Sesiones",
+                                description = "Sesiones activas de agentes con el gateway.",
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.MEMORY ||
+                        currentDestination == AppDestination.MEMORY_LIST ->
+                            ComingSoonScreen(
+                                title = "🧠 Memoria",
+                                description = "Entradas de memoria persistente de los agentes.",
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.CRON ||
+                        currentDestination == AppDestination.CRON_LIST ->
+                            ComingSoonScreen(
+                                title = "⏰ Cron Jobs",
+                                description = "Tareas programadas que ejecutan agentes automáticamente.",
+                                modifier = Modifier.weight(1f)
+                            )
+
                         currentDestination == AppDestination.MONITOR ||
                         currentDestination == AppDestination.MONITOR_LOG ->
                             MonitorScreen(
@@ -84,6 +115,13 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
                             SetupScreen(
                                 viewModel = viewModel,
                                 onConnect = { isConnected = true }
+                            )
+
+                        else ->
+                            ComingSoonScreen(
+                                title = currentDestination.label,
+                                description = "Próximamente.",
+                                modifier = Modifier.weight(1f)
                             )
                     }
 

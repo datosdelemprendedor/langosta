@@ -37,29 +37,34 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
                     VerticalDivider()
 
                     when (currentDestination) {
-                        AppDestination.DASHBOARD -> DashboardScreen(
-                            viewModel = dashboardViewModel,
-                            modifier = Modifier.weight(1f)
-                        )
+                        AppDestination.DASHBOARD ->
+                            DashboardScreen(
+                                viewModel = dashboardViewModel,
+                                modifier = Modifier.weight(1f)
+                            )
                         AppDestination.AGENTS,
-                        AppDestination.AGENTS_LIST -> AgentPanel(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
+                        AppDestination.AGENTS_LIST ->
+                            AgentsScreen(
+                                viewModel = dashboardViewModel,
+                                modifier = Modifier.weight(1f)
+                            )
                         AppDestination.TASKS,
-                        AppDestination.TASKS_BOARD -> TaskBoardScreen(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AppDestination.SETTINGS,
-                        AppDestination.SETTINGS_SERVER -> SetupScreen(
-                            viewModel = viewModel,
-                            onConnect = { isConnected = true }
-                        )
-                        else -> TaskBoardScreen(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
+                        AppDestination.TASKS_BOARD ->
+                            TaskBoardScreen(
+                                viewModel = viewModel,
+                                modifier = Modifier.weight(1f)
+                            )
+                        AppDestination.MONITOR,
+                        AppDestination.MONITOR_LOG ->
+                            MonitorScreen(
+                                viewModel = dashboardViewModel,
+                                modifier = Modifier.weight(1f)
+                            )
+                        AppDestination.SETTINGS ->
+                            SetupScreen(
+                                viewModel = viewModel,
+                                onConnect = { isConnected = true }
+                            )
                     }
 
                     VerticalDivider()

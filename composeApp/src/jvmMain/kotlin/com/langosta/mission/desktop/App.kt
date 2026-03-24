@@ -86,11 +86,7 @@ fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
 
                         currentDestination == AppDestination.MEMORY ||
                         currentDestination == AppDestination.MEMORY_LIST ->
-                            ComingSoonScreen(
-                                title = "🧠 Memoria",
-                                description = "Entradas de memoria persistente de los agentes.",
-                                modifier = Modifier.weight(1f)
-                            )
+                            MemoryScreen(modifier = Modifier.weight(1f))
 
                         currentDestination == AppDestination.MONITOR ||
                         currentDestination == AppDestination.MONITOR_LOG ->

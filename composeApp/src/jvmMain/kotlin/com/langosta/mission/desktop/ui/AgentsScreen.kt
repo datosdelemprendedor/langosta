@@ -7,7 +7,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,10 +22,10 @@ import com.langosta.mission.desktop.DashboardUiState
 import com.langosta.mission.desktop.DashboardViewModel
 import com.langosta.mission.domain.model.AgentNode
 
-private val Green = Color(0xFF4CAF50)
-private val Grey  = Color(0xFF78909C)
-private val Red   = Color(0xFFF44336)
-private val Amber = Color(0xFFFFC107)
+private val AgentGreen = Color(0xFF4CAF50)
+private val AgentGrey  = Color(0xFF78909C)
+private val AgentRed   = Color(0xFFF44336)
+private val AgentAmber = Color(0xFFFFC107)
 
 @Composable
 fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
@@ -32,7 +34,6 @@ fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) { viewModel.startPolling() }
 
     Column(modifier = modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-
         // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -44,7 +45,7 @@ fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
                 Text("Nodos de procesamiento del gateway", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             OutlinedButton(onClick = { viewModel.retry() }) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Actualizar")
             }
@@ -56,25 +57,23 @@ fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
             }
             is DashboardUiState.Error -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(40.dp))
+                    Icon(Icons.Filled.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(40.dp))
                     Text(state.message, color = MaterialTheme.colorScheme.error)
                 }
             }
             is DashboardUiState.Connected -> {
                 val agents = state.data.agents
-
-                // Stats bar
+                // Stats pills
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AgentStatPill("Total", "${agents.size}", MaterialTheme.colorScheme.primary)
-                    AgentStatPill("Activos", "${agents.count { it.status in listOf("active","busy") }}", Green)
-                    AgentStatPill("Idle", "${agents.count { it.status == "idle" }}", Grey)
-                    AgentStatPill("Error", "${agents.count { it.status == "error" }}", Red)
+                    AgentStatPill("Total",   "${agents.size}",                                             MaterialTheme.colorScheme.primary)
+                    AgentStatPill("Activos", "${agents.count { it.status in listOf("active","busy") }}", AgentGreen)
+                    AgentStatPill("Idle",    "${agents.count { it.status == "idle" }}",                   AgentGrey)
+                    AgentStatPill("Error",   "${agents.count { it.status == "error" }}",                  AgentRed)
                 }
-
                 if (agents.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.SmartToy, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(Icons.Filled.SmartToy, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("Sin agentes conectados", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -91,74 +90,53 @@ fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
 @Composable
 private fun AgentDetailCard(agent: AgentNode) {
     val statusColor = when (agent.status) {
-        "busy", "active" -> Green
-        "idle"           -> Grey
-        "error"          -> Red
-        else             -> Amber
+        "busy", "active" -> AgentGreen
+        "idle"           -> AgentGrey
+        "error"          -> AgentRed
+        else             -> AgentAmber
     }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = CardDefaults.cardElevation(2.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Cabecera
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                    )
+                    Box(Modifier.size(12.dp).clip(CircleShape).background(statusColor))
                     Column {
                         Text(agent.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         Text(agent.type, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        agent.model,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                    Text(agent.model, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
+                            .padding(horizontal = 8.dp, vertical = 3.dp))
                     StatusChip(agent.status)
                 }
             }
-
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-
-            // Métricas
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricBox("Tokens entrada", formatTokens(agent.tokensIn), Modifier.weight(1f))
-                MetricBox("Tokens salida", formatTokens(agent.tokensOut), Modifier.weight(1f))
+                MetricBox("Tokens entrada", formatTokens(agent.tokensIn),  Modifier.weight(1f))
+                MetricBox("Tokens salida",  formatTokens(agent.tokensOut), Modifier.weight(1f))
                 MetricBox("Utilización", "${agent.utilization}%", Modifier.weight(1f),
                     valueColor = when {
-                        agent.utilization >= 90 -> Red
-                        agent.utilization >= 60 -> Amber
-                        else -> Green
-                    }
-                )
+                        agent.utilization >= 90 -> AgentRed
+                        agent.utilization >= 60 -> AgentAmber
+                        else -> AgentGreen
+                    })
                 MetricBox("Última vez", agent.lastSeen, Modifier.weight(1.5f))
             }
-
-            // Barra de utilización
             if (agent.utilization > 0) {
                 LinearProgressIndicator(
                     progress = { agent.utilization / 100f },
                     modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
                     color = when {
-                        agent.utilization >= 90 -> Red
-                        agent.utilization >= 60 -> Amber
-                        else -> Green
+                        agent.utilization >= 90 -> AgentRed
+                        agent.utilization >= 60 -> AgentAmber
+                        else -> AgentGreen
                     },
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
@@ -170,8 +148,7 @@ private fun AgentDetailCard(agent: AgentNode) {
 @Composable
 private fun MetricBox(label: String, value: String, modifier: Modifier, valueColor: Color = MaterialTheme.colorScheme.onSurface) {
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+        modifier = modifier.clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
@@ -183,8 +160,7 @@ private fun MetricBox(label: String, value: String, modifier: Modifier, valueCol
 @Composable
 private fun AgentStatPill(label: String, value: String, color: Color) {
     Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+        modifier = Modifier.clip(RoundedCornerShape(8.dp))
             .background(color.copy(alpha = 0.12f))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),

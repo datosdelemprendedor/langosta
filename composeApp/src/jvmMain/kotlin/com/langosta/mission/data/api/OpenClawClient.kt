@@ -4,13 +4,11 @@ import com.langosta.mission.domain.model.*
 import com.langosta.mission.util.AppLogger
 import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
-import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
 class OpenClawClient(private val baseUrl: String) {
@@ -21,20 +19,46 @@ class OpenClawClient(private val baseUrl: String) {
         }
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     private fun HttpRequestBuilder.withAuth() {
         val token = ConfigManager.getAuthToken()
         if (token.isNotEmpty()) header("Authorization", "Bearer $token")
     }
 
-    suspend fun ping(): OpenClawBootstrapConfig =
-        client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
+    /**
+     * Usa bodyAsText() + decodeFromString para evitar el error:
+     * "Serializer for class 'OpenClawBootstrapConfig' is not found"
+     * que ocurre cuando Ktor intenta buscar el serializer via reflexion de tipos
+     * en JVM/KMP (el plugin de serializacion no lo registra automaticamente).
+     */
+    suspend fun ping(): OpenClawBootstrapConfig = getBootstrapConfig()
 
-    suspend fun getBootstrapConfig(): OpenClawBootstrapConfig =
-        client.get("$baseUrl/__openclaw/control-ui-config.json") { withAuth() }.body()
+    suspend fun getBootstrapConfig(): OpenClawBootstrapConfig {
+        return try {
+            val text = client.get("$baseUrl/__openclaw/control-ui-config.json") {
+                withAuth()
+            }.bodyAsText()
+            json.decodeFromString<OpenClawBootstrapConfig>(text)
+        } catch (e: Exception) {
+            AppLogger.w("OpenClawClient", "getBootstrapConfig failed: ${e.message}")
+            // Fallback con valores por defecto
+            OpenClawBootstrapConfig(
+                basePath = "",
+                assistantName = "OpenClaw",
+                assistantAvatar = "",
+                assistantAgentId = "main"
+            )
+        }
+    }
 
     suspend fun getHealth(): String {
-        val response = client.get("$baseUrl/health") { withAuth() }.bodyAsText()
-        return response
+        return try {
+            client.get("$baseUrl/health") { withAuth() }.bodyAsText()
+        } catch (e: Exception) {
+            AppLogger.w("OpenClawClient", "getHealth failed: ${e.message}")
+            ""
+        }
     }
 
     fun dashboardFromConfig(config: OpenClawBootstrapConfig): DashboardState =
@@ -93,21 +117,25 @@ class OpenClawClient(private val baseUrl: String) {
                 .jsonPrimitive.content
         } catch (e: Exception) {
             AppLogger.e("OpenClawClient", "sendMessage failed: ${e.message}")
-            throw Exception("Failed to send message. Ensure /v1/chat/completions is enabled in OpenClaw config. Error: ${e.message}")
+            throw Exception("Failed to send message: ${e.message}")
         }
     }
 
-
     suspend fun getAgents(): List<Agent> {
-        val config = getBootstrapConfig()
-        return listOf(
-            Agent(
-                id = config.assistantAgentId,
-                name = config.assistantName,
-                model = "openclaw",
-                isOnline = true
+        return try {
+            val config = getBootstrapConfig()
+            listOf(
+                Agent(
+                    id = config.assistantAgentId,
+                    name = config.assistantName,
+                    model = "openclaw",
+                    isOnline = true
+                )
             )
-        )
+        } catch (e: Exception) {
+            AppLogger.w("OpenClawClient", "getAgents failed: ${e.message}")
+            emptyList()
+        }
     }
 
     suspend fun getTasks(): List<Task> = emptyList()

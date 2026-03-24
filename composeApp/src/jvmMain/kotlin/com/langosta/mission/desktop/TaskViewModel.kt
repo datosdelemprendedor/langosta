@@ -56,15 +56,34 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
+    /**
+     * Intenta conectar via CLI gateway primero.
+     * Si falla (gateway no disponible), intenta HTTP como fallback.
+     */
     suspend fun testConnection(): Boolean {
+        // 1. Intento via CLI (gateway local)
         return try {
-            val client = OpenClawClient(ConfigManager.getServerUrl())
-            client.ping()
-            _serverStatus.value = true
+            val gatewayClient = OpenClawGatewayClient()
+            val health = gatewayClient.health()
+            val ok = health.status == "online"
+            _serverStatus.value = ok
+            AppLogger.i("TaskViewModel", "Gateway CLI health: ${health.status}")
+            if (ok) return true
+            // Si el gateway responde pero está offline, igual conectamos (puede ser momentáneo)
             true
         } catch (e: Exception) {
-            _serverStatus.value = false
-            false
+            AppLogger.w("TaskViewModel", "Gateway CLI failed, trying HTTP: ${e.message}")
+            // 2. Fallback HTTP
+            try {
+                val client = OpenClawClient(ConfigManager.getServerUrl())
+                client.ping()
+                _serverStatus.value = true
+                true
+            } catch (e2: Exception) {
+                AppLogger.e("TaskViewModel", "HTTP fallback also failed: ${e2.message}")
+                _serverStatus.value = false
+                false
+            }
         }
     }
 
@@ -113,21 +132,15 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
-    // Crear tarea en OpenClaw via CLI
     fun createTask(title: String, description: String, agentId: String?) {
         scope.launch {
             try {
                 val targetAgent = agentId ?: _agents.value.firstOrNull()?.id ?: "main"
                 val fullTask = "Tarea: $title\nDescripción: $description"
-                
-                AppLogger.i("TaskViewModel", "Creating task via CLI for agent: $targetAgent")
-                
                 val gatewayClient = OpenClawGatewayClient()
                 val response = gatewayClient.sendMessage(targetAgent, fullTask)
-                
                 AppLogger.i("TaskViewModel", "Task response: $response")
                 NotificationManager.success("Tarea creada", "Agent: $targetAgent")
-                
             } catch (e: Exception) {
                 AppLogger.e("TaskViewModel", "Error creating task: ${e.message}", e)
                 _error.value = "Error: ${e.message}"
@@ -164,6 +177,5 @@ class TaskViewModel(private val repository: TaskRepository) {
     }
 
     fun clearError() { _error.value = null }
-
     fun dispose() { scope.cancel() }
 }

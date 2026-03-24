@@ -1,6 +1,7 @@
 package com.langosta.mission.desktop.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,7 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.langosta.mission.desktop.DashboardUiState
 import com.langosta.mission.desktop.DashboardViewModel
-import com.langosta.mission.domain.model.AgentNode
+import com.langosta.mission.domain.model.Agent
+import com.langosta.mission.domain.model.AgentStatus
 
 private val AgentGreen = Color(0xFF4CAF50)
 private val AgentGrey  = Color(0xFF78909C)
@@ -28,13 +30,21 @@ private val AgentRed   = Color(0xFFF44336)
 private val AgentAmber = Color(0xFFFFC107)
 
 @Composable
-fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
+fun AgentsScreen(
+    viewModel: DashboardViewModel,
+    onOpenSkills: (Agent) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     val uiState by viewModel.uiState.collectAsState()
+    val agents  by viewModel.agents.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.startPolling() }
+    LaunchedEffect(Unit) {
+        viewModel.startPolling()
+        viewModel.loadAgents()
+    }
 
     Column(modifier = modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        // Header
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -42,118 +52,113 @@ fun AgentsScreen(viewModel: DashboardViewModel, modifier: Modifier = Modifier) {
         ) {
             Column {
                 Text("Agentes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("Nodos de procesamiento del gateway", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Nodos de procesamiento del gateway",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            OutlinedButton(onClick = { viewModel.retry() }) {
+            OutlinedButton(onClick = { viewModel.loadAgents() }) {
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Actualizar")
             }
         }
 
-        when (val state = uiState) {
-            is DashboardUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        // Stats pills
+        if (agents.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AgentStatPill("Total",   "${agents.size}",                                                         MaterialTheme.colorScheme.primary)
+                AgentStatPill("Activos", "${agents.count { it.status == AgentStatus.ACTIVE }}",                    AgentGreen)
+                AgentStatPill("Ocupados","${agents.count { it.status == AgentStatus.BUSY }}",                      AgentAmber)
+                AgentStatPill("Idle",    "${agents.count { it.status == AgentStatus.IDLE }}",                      AgentGrey)
+                AgentStatPill("Error",   "${agents.count { it.status == AgentStatus.ERROR }}",                     AgentRed)
             }
-            is DashboardUiState.Error -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Filled.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(40.dp))
-                    Text(state.message, color = MaterialTheme.colorScheme.error)
+        }
+
+        when {
+            agents.isEmpty() && uiState is DashboardUiState.Loading ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
-            }
-            is DashboardUiState.Connected -> {
-                val agents = state.data.agents
-                // Stats pills
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AgentStatPill("Total",   "${agents.size}",                                             MaterialTheme.colorScheme.primary)
-                    AgentStatPill("Activos", "${agents.count { it.status in listOf("active","busy") }}", AgentGreen)
-                    AgentStatPill("Idle",    "${agents.count { it.status == "idle" }}",                   AgentGrey)
-                    AgentStatPill("Error",   "${agents.count { it.status == "error" }}",                  AgentRed)
-                }
-                if (agents.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Filled.SmartToy, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("Sin agentes conectados", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(agents) { agent -> AgentDetailCard(agent) }
+            uiState is DashboardUiState.Error ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(40.dp))
+                        Text((uiState as DashboardUiState.Error).message, color = MaterialTheme.colorScheme.error)
                     }
                 }
-            }
+            agents.isEmpty() ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.SmartToy, null, modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Sin agentes conectados",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            else ->
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(agents, key = { it.id }) { agent ->
+                        AgentCard(agent = agent, onClick = { onOpenSkills(agent) })
+                    }
+                }
         }
     }
 }
 
 @Composable
-private fun AgentDetailCard(agent: AgentNode) {
+private fun AgentCard(agent: Agent, onClick: () -> Unit) {
     val statusColor = when (agent.status) {
-        "busy", "active" -> AgentGreen
-        "idle"           -> AgentGrey
-        "error"          -> AgentRed
-        else             -> AgentAmber
+        AgentStatus.ACTIVE -> AgentGreen
+        AgentStatus.BUSY   -> AgentAmber
+        AgentStatus.ERROR  -> AgentRed
+        AgentStatus.IDLE   -> AgentGrey
     }
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = CardDefaults.cardElevation(2.dp)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(12.dp).clip(CircleShape).background(statusColor))
-                    Column {
-                        Text(agent.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(agent.type, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        shape = RoundedCornerShape(14.dp),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Emoji + nombre + modelo
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(agent.emoji, style = MaterialTheme.typography.titleLarge)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(agent.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold)
+                    Text(agent.model,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (agent.skills.isNotEmpty()) {
+                        Text("${agent.skills.count { it.enabled }} skills activos",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary)
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(agent.model, style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .padding(horizontal = 8.dp, vertical = 3.dp))
-                    StatusChip(agent.status)
+            }
+            // Status + indicador
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    StatusChip(agent.status.label)
+                    Text("Ver skills ›",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary)
                 }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricBox("Tokens entrada", formatTokens(agent.tokensIn),  Modifier.weight(1f))
-                MetricBox("Tokens salida",  formatTokens(agent.tokensOut), Modifier.weight(1f))
-                MetricBox("Utilización", "${agent.utilization}%", Modifier.weight(1f),
-                    valueColor = when {
-                        agent.utilization >= 90 -> AgentRed
-                        agent.utilization >= 60 -> AgentAmber
-                        else -> AgentGreen
-                    })
-                MetricBox("Última vez", agent.lastSeen, Modifier.weight(1.5f))
-            }
-            if (agent.utilization > 0) {
-                LinearProgressIndicator(
-                    progress = { agent.utilization / 100f },
-                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
-                    color = when {
-                        agent.utilization >= 90 -> AgentRed
-                        agent.utilization >= 60 -> AgentAmber
-                        else -> AgentGreen
-                    },
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                Box(Modifier.size(10.dp).clip(CircleShape).background(statusColor))
             }
         }
-    }
-}
-
-@Composable
-private fun MetricBox(label: String, value: String, modifier: Modifier, valueColor: Color = MaterialTheme.colorScheme.onSurface) {
-    Column(
-        modifier = modifier.clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-    ) {
-        Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, color = valueColor)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

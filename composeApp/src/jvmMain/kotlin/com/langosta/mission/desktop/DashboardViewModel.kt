@@ -9,6 +9,7 @@ import com.langosta.mission.util.ConfigManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class DashboardUiState {
     object Loading : DashboardUiState()
@@ -31,10 +32,16 @@ class DashboardViewModel {
 
     private val wsManager = WebSocketManager(ConfigManager.getWebSocketUrl())
     private val gatewayClient = OpenClawGatewayClient()
-
     private val repository = DashboardRepository(gatewayClient = gatewayClient)
 
+    private val isPolling = AtomicBoolean(false)
+    private val isStreaming = AtomicBoolean(false)
+
     fun startPolling() {
+        if (!isPolling.compareAndSet(false, true)) {
+            AppLogger.i("DashboardViewModel", "startPolling() ya activo, ignorando llamada duplicada")
+            return
+        }
         scope.launch {
             try {
                 repository.dashboardStream().collect { state ->
@@ -44,11 +51,17 @@ class DashboardViewModel {
             } catch (e: Exception) {
                 _uiState.value = DashboardUiState.Error(e.message ?: "Error desconocido")
                 AppLogger.e("DashboardViewModel", "Polling error", e)
+            } finally {
+                isPolling.set(false)
             }
         }
     }
 
     fun startIncidentStream() {
+        if (!isStreaming.compareAndSet(false, true)) {
+            AppLogger.i("DashboardViewModel", "startIncidentStream() ya activo, ignorando llamada duplicada")
+            return
+        }
         scope.launch {
             try { wsManager.connectWithRetry() }
             catch (e: Exception) { AppLogger.e("DashboardViewModel", "WS error", e) }
@@ -73,6 +86,7 @@ class DashboardViewModel {
     }
 
     fun retry() {
+        isPolling.set(false)
         _uiState.value = DashboardUiState.Loading
         startPolling()
     }

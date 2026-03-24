@@ -2,13 +2,12 @@ package com.langosta.mission.desktop
 
 import com.langosta.mission.data.TaskHistoryDatabase
 import com.langosta.mission.data.TaskHistoryEntry
-import com.langosta.mission.data.api.OpenClawClient
+import com.langosta.mission.data.api.OpenClawGatewayClient
 import com.langosta.mission.data.repository.TaskRepository
 import com.langosta.mission.domain.model.Agent
 import com.langosta.mission.domain.model.Task
 import com.langosta.mission.domain.model.TaskStatus
 import com.langosta.mission.util.AppLogger
-import com.langosta.mission.util.ConfigManager
 import com.langosta.mission.util.NotificationManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,13 +54,19 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
+    /**
+     * Verifica conexión via CLI gateway. No usa OpenClawClient (HTTP) para evitar
+     * SerializationException en JVM con getBootstrapConfig.
+     */
     suspend fun testConnection(): Boolean {
         return try {
-            val client = OpenClawClient(ConfigManager.getServerUrl())
-            client.getTasks()
-            _serverStatus.value = true
+            val gatewayClient = OpenClawGatewayClient()
+            val health = gatewayClient.health()
+            _serverStatus.value = health.status == "online"
+            AppLogger.i("TaskViewModel", "Gateway health: ${health.status}")
             true
         } catch (e: Exception) {
+            AppLogger.w("TaskViewModel", "Connection failed: ${e.message}")
             _serverStatus.value = false
             false
         }
@@ -70,9 +75,17 @@ class TaskViewModel(private val repository: TaskRepository) {
     fun fetchAgents() {
         scope.launch {
             try {
-                val client = OpenClawClient(ConfigManager.getServerUrl())
-                _agents.value = client.getAgents()
-                AppLogger.i("TaskViewModel", "Agents loaded")
+                val gatewayClient = OpenClawGatewayClient()
+                val config = gatewayClient.getBootstrapConfig()
+                _agents.value = listOf(
+                    Agent(
+                        id = config.assistantAgentId,
+                        name = config.assistantName,
+                        model = "openclaw",
+                        isOnline = true
+                    )
+                )
+                AppLogger.i("TaskViewModel", "Agents loaded: ${_agents.value.size}")
             } catch (e: Exception) {
                 AppLogger.e("TaskViewModel", "Error fetching agents", e)
             }
@@ -83,7 +96,6 @@ class TaskViewModel(private val repository: TaskRepository) {
         scope.launch {
             try {
                 val task = tasks.value.find { it.id == taskId }
-
                 repository.updateStatus(taskId, status)
 
                 if (status == TaskStatus.COMPLETED || status == TaskStatus.FAILED) {
@@ -105,7 +117,6 @@ class TaskViewModel(private val repository: TaskRepository) {
                     )
                     _history.value = TaskHistoryDatabase.getAll()
                 }
-
                 NotificationManager.success("Updated", "Task status → ${status.name}")
             } catch (e: Exception) {
                 _error.value = e.message
@@ -117,45 +128,42 @@ class TaskViewModel(private val repository: TaskRepository) {
     fun createTask(title: String, description: String, agentId: String?) {
         scope.launch {
             try {
-                val client = OpenClawClient(ConfigManager.getServerUrl())
-                val newTask = Task(
-                    id = "",
-                    title = title,
-                    description = description,
-                    status = TaskStatus.PENDING,
-                    assignedAgentId = agentId
-                )
-                client.createTask(newTask)
-                repository.fetchTasks()
-                NotificationManager.success("Tarea creada", title)
+                val targetAgent = agentId ?: _agents.value.firstOrNull()?.id ?: "main"
+                val fullTask = "Tarea: $title\nDescripción: $description"
+                val gatewayClient = OpenClawGatewayClient()
+                val response = gatewayClient.sendMessage(targetAgent, fullTask)
+                AppLogger.i("TaskViewModel", "Task response: $response")
+                NotificationManager.success("Tarea creada", "Agent: $targetAgent")
             } catch (e: Exception) {
-                _error.value = e.message
-                AppLogger.e("TaskViewModel", "Error creating task", e)
+                AppLogger.e("TaskViewModel", "Error creating task: ${e.message}", e)
+                _error.value = "Error: ${e.message}"
+                NotificationManager.error("Error", e.message ?: "Unknown error")
             }
         }
     }
 
+    /**
+     * Auto-refresh: solo actualiza serverStatus via CLI gateway.
+     * NO usa OpenClawClient.getAgents() para evitar SerializationException.
+     */
     fun startAutoRefresh() {
         scope.launch {
             while (true) {
                 delay(5000)
                 try {
-                    repository.fetchTasks()
-                    val client = OpenClawClient(ConfigManager.getServerUrl())
-                    _agents.value = client.getAgents()
-                    _serverStatus.value = true
+                    val gatewayClient = OpenClawGatewayClient()
+                    val health = gatewayClient.health()
+                    _serverStatus.value = health.status == "online"
                 } catch (e: Exception) {
                     _serverStatus.value = false
-                    AppLogger.e("TaskViewModel", "Auto-refresh error", e)
+                    AppLogger.w("TaskViewModel", "Auto-refresh: gateway unreachable")
                 }
             }
         }
     }
 
     fun loadHistory() {
-        scope.launch {
-            _history.value = TaskHistoryDatabase.getAll()
-        }
+        scope.launch { _history.value = TaskHistoryDatabase.getAll() }
     }
 
     fun clearHistory() {
@@ -165,11 +173,6 @@ class TaskViewModel(private val repository: TaskRepository) {
         }
     }
 
-    fun clearError() {
-        _error.value = null
-    }
-
-    fun dispose() {
-        scope.cancel()
-    }
+    fun clearError() { _error.value = null }
+    fun dispose() { scope.cancel() }
 }

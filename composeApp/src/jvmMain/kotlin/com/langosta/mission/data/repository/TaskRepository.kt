@@ -19,7 +19,7 @@ class TaskRepository(
     }
 
     suspend fun updateStatus(taskId: String, status: TaskStatus) {
-        client.updateTaskStatus(taskId, status.name)
+        // Tasks son locales ahora, solo actualiza en DB
         db.updateTaskStatus(taskId, status)
     }
 

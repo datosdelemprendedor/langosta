@@ -8,12 +8,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.langosta.mission.desktop.ui.*
 import com.langosta.mission.desktop.ui.theme.AppTheme
+import com.langosta.mission.domain.model.Agent
 
 @Composable
-fun App(viewModel: TaskViewModel) {
+fun App(viewModel: TaskViewModel, dashboardViewModel: DashboardViewModel) {
     var isConnected by remember { mutableStateOf(false) }
     var darkTheme by remember { mutableStateOf(true) }
     var currentDestination by remember { mutableStateOf(AppDestination.DASHBOARD) }
+    var selectedAgent by remember { mutableStateOf<Agent?>(null) }
 
     AppTheme(darkTheme = darkTheme) {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -23,49 +25,92 @@ fun App(viewModel: TaskViewModel) {
                     onConnect = {
                         isConnected = true
                         viewModel.startAutoRefresh()
+                        dashboardViewModel.startPolling()
                     }
                 )
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
 
-                    // Sidebar
                     Sidebar(
                         selected = currentDestination,
-                        onSelect = { currentDestination = it }
+                        onSelect = {
+                            currentDestination = it
+                            selectedAgent = null
+                        },
+                        isConnected = isConnected
                     )
 
                     VerticalDivider()
 
-                    // Contenido principal
-                    when (currentDestination) {
-                        AppDestination.DASHBOARD -> TaskBoardScreen(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AppDestination.AGENTS,
-                        AppDestination.AGENTS_LIST -> AgentPanel(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AppDestination.TASKS,
-                        AppDestination.TASKS_BOARD -> TaskBoardScreen(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AppDestination.SETTINGS,
-                        AppDestination.SETTINGS_SERVER -> SetupScreen(
-                            viewModel = viewModel,
-                            onConnect = { isConnected = true }
-                        )
-                        else -> TaskBoardScreen(
-                            viewModel = viewModel,
-                            modifier = Modifier.weight(1f)
-                        )
+                    when {
+                        selectedAgent != null ->
+                            SkillsScreen(
+                                agent = selectedAgent!!,
+                                viewModel = dashboardViewModel,
+                                onBack = { selectedAgent = null },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.DASHBOARD ->
+                            DashboardScreen(
+                                viewModel = dashboardViewModel,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.AGENTS ||
+                        currentDestination == AppDestination.AGENTS_LIST ->
+                            AgentsScreen(
+                                viewModel = dashboardViewModel,
+                                onOpenSkills = { agent -> selectedAgent = agent },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.TASKS ||
+                        currentDestination == AppDestination.TASKS_BOARD ->
+                            TaskBoardScreen(
+                                viewModel = viewModel,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.CHANNELS ||
+                        currentDestination == AppDestination.CHANNELS_LIST ->
+                            ChannelsScreen(modifier = Modifier.weight(1f))
+
+                        currentDestination == AppDestination.SESSIONS ||
+                        currentDestination == AppDestination.SESSIONS_LIST ->
+                            SessionsScreen(modifier = Modifier.weight(1f))
+
+                        currentDestination == AppDestination.CRON ||
+                        currentDestination == AppDestination.CRON_LIST ->
+                            CronScreen(modifier = Modifier.weight(1f))
+
+                        currentDestination == AppDestination.MEMORY ||
+                        currentDestination == AppDestination.MEMORY_LIST ->
+                            MemoryScreen(modifier = Modifier.weight(1f))
+
+                        currentDestination == AppDestination.MONITOR ||
+                        currentDestination == AppDestination.MONITOR_LOG ->
+                            MonitorScreen(
+                                viewModel = dashboardViewModel,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                        currentDestination == AppDestination.SETTINGS ->
+                            SetupScreen(
+                                viewModel = viewModel,
+                                onConnect = { isConnected = true }
+                            )
+
+                        else ->
+                            ComingSoonScreen(
+                                title = currentDestination.label,
+                                description = "Próximamente.",
+                                modifier = Modifier.weight(1f)
+                            )
                     }
 
                     VerticalDivider()
 
-                    // Panel de notificaciones
                     NotificationPanel(
                         darkTheme = darkTheme,
                         onToggleTheme = { darkTheme = !darkTheme }

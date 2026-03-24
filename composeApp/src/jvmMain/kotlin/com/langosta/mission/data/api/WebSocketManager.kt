@@ -22,26 +22,19 @@ import java.util.Base64
 import java.util.UUID
 
 /**
- * Gestiona la conexion WebSocket al gateway OpenClaw.
+ * WebSocket al gateway OpenClaw con device identity ECDSA P-256.
  *
- * Device identity: reutiliza el keypair del browser (raw Base64url P-256)
- * leido desde ~/.openclaw/device-identity.json.
- *
- * La private key del browser es un scalar raw de 32 bytes (no PKCS8).
- * Se reconstruye via BouncyCastle -> ECPrivateKeySpec.
+ * La private key del browser es raw Base64url (32 bytes = scalar D).
+ * Java genera firmas ECDSA en DER (ASN.1), pero WebCrypto espera IEEE P1363 (r||s, 64 bytes).
+ * -> Se convierte DER -> P1363 antes de enviar.
  */
 class WebSocketManager(private val baseUrl: String) {
 
     init {
-        // Registrar BouncyCastle si no esta registrado
-        if (Security.getProvider("BC") == null) {
-            Security.addProvider(BouncyCastleProvider())
-        }
+        if (Security.getProvider("BC") == null) Security.addProvider(BouncyCastleProvider())
     }
 
-    private val client = HttpClient {
-        install(WebSockets)
-    }
+    private val client = HttpClient { install(WebSockets) }
 
     private val _events = MutableSharedFlow<String>()
     val events = _events.asSharedFlow()
@@ -51,42 +44,70 @@ class WebSocketManager(private val baseUrl: String) {
 
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
-        object Connecting : ConnectionState()
-        object Connected : ConnectionState()
+        object Connecting   : ConnectionState()
+        object Connected    : ConnectionState()
         data class Error(val message: String) : ConnectionState()
     }
 
     /**
-     * Construye la firma ECDSA usando la raw private key del browser.
-     * La key es Base64url sin padding (32 bytes = scalar D de la curva P-256).
+     * Convierte firma ECDSA de DER (ASN.1) a IEEE P1363 (r||s concatenados, 64 bytes).
+     * WebCrypto.verify() espera P1363, Java produce DER.
+     *
+     * DER layout: 0x30 <len> 0x02 <rLen> <r> 0x02 <sLen> <s>
+     */
+    private fun derToP1363(der: ByteArray): ByteArray {
+        var offset = 2                          // saltar 0x30 <totalLen>
+        if (der[1].toInt() and 0xff == 0x81) offset = 3  // len > 127
+        offset++                                // saltar 0x02
+        val rLen = der[offset++].toInt() and 0xff
+        val r = der.copyOfRange(offset, offset + rLen)
+        offset += rLen
+        offset++                                // saltar 0x02
+        val sLen = der[offset++].toInt() and 0xff
+        val s = der.copyOfRange(offset, offset + sLen)
+
+        // Normalizar r y s a 32 bytes (quitar byte 0x00 de padding o rellenar con 0)
+        fun normalize(bytes: ByteArray): ByteArray {
+            val trimmed = bytes.dropWhile { it == 0.toByte() }.toByteArray()
+            return if (trimmed.size == 32) trimmed
+            else ByteArray(32 - trimmed.size) + trimmed
+        }
+        return normalize(r) + normalize(s)
+    }
+
+    /**
+     * Firma el payload con la raw private key P-256 del browser.
+     * Devuelve la firma en Base64url (formato que usa WebCrypto).
      */
     private fun signWithRawKey(privateKeyB64url: String, deviceId: String, nonce: String, timestamp: Long): String {
-        // Base64url -> bytes (agregar padding si falta)
         val padded = privateKeyB64url
             .replace('-', '+').replace('_', '/')
             .let { it + "=".repeat((4 - it.length % 4) % 4) }
         val rawBytes = Base64.getDecoder().decode(padded)
 
-        // Reconstruir ECPrivateKey desde scalar raw via BouncyCastle
         val curveParams = ECNamedCurveTable.getParameterSpec("secp256r1")
-        val curveSpec = ECNamedCurveSpec("secp256r1", curveParams.curve, curveParams.g, curveParams.n)
-        val privKeySpec = ECPrivateKeySpec(BigInteger(1, rawBytes), curveSpec)
-        val privKey = KeyFactory.getInstance("EC", "BC").generatePrivate(privKeySpec)
+        val curveSpec   = ECNamedCurveSpec("secp256r1", curveParams.curve, curveParams.g, curveParams.n)
+        val privKey     = KeyFactory.getInstance("EC", "BC")
+            .generatePrivate(ECPrivateKeySpec(BigInteger(1, rawBytes), curveSpec))
 
-        // Firmar payload
         val payload = "v3:$deviceId:$nonce:$timestamp"
         val sig = Signature.getInstance("SHA256withECDSA", "BC")
         sig.initSign(privKey)
         sig.update(payload.toByteArray(Charsets.UTF_8))
-        return Base64.getEncoder().encodeToString(sig.sign())
+        val derBytes = sig.sign()
+
+        // Convertir DER -> P1363 (r||s) que es lo que valida el servidor (WebCrypto)
+        val p1363 = derToP1363(derBytes)
+        // Devolver en Base64url sin padding (igual que WebCrypto)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(p1363)
     }
 
     suspend fun connectWithRetry(path: String = "") {
-        val token = ConfigManager.getAuthToken()
+        val token    = ConfigManager.getAuthToken()
         val serverUrl = ConfigManager.getServerUrl()
-        val host = serverUrl.removePrefix("http://").removePrefix("https://").substringBefore(":")
-        val port = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
-        val origin = "http://$host:$port"
+        val host     = serverUrl.removePrefix("http://").removePrefix("https://").substringBefore(":")
+        val port     = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
+        val origin   = "http://$host:$port"
 
         if (!ConfigManager.hasPairedDevice()) {
             AppLogger.e("WebSocketManager", "No hay device identity. Crea ~/.openclaw/device-identity.json")
@@ -94,8 +115,8 @@ class WebSocketManager(private val baseUrl: String) {
             return
         }
 
-        val deviceId  = ConfigManager.getPairedDeviceId()
-        val publicKey = ConfigManager.getPairedPublicKey()
+        val deviceId         = ConfigManager.getPairedDeviceId()
+        val publicKey        = ConfigManager.getPairedPublicKey()
         val privateKeyB64url = ConfigManager.getPairedPrivateKey()
 
         AppLogger.i("WebSocketManager", "Connecting | deviceId=${deviceId.take(16)}...")
@@ -103,34 +124,28 @@ class WebSocketManager(private val baseUrl: String) {
         try {
             _connectionState.emit(ConnectionState.Connecting)
             client.webSocket(
-                host = host,
-                port = port,
-                path = path,
+                host = host, port = port, path = path,
                 request = {
                     header("Origin", origin)
                     header("Host", "$host:$port")
                 }
             ) {
                 // 1. Challenge
-                val challengeFrame = incoming.receive()
-                if (challengeFrame !is Frame.Text) {
-                    _connectionState.emit(ConnectionState.Error("Expected text frame"))
-                    return@webSocket
-                }
-                val challengeJson = Json.parseToJsonElement(challengeFrame.readText()).jsonObject
+                val cf = incoming.receive()
+                if (cf !is Frame.Text) { _connectionState.emit(ConnectionState.Error("Expected text frame")); return@webSocket }
+                val challengeJson = Json.parseToJsonElement(cf.readText()).jsonObject
                 if (challengeJson["event"]?.jsonPrimitive?.content != "connect.challenge") {
-                    _connectionState.emit(ConnectionState.Error("Expected connect.challenge"))
-                    return@webSocket
+                    _connectionState.emit(ConnectionState.Error("Expected connect.challenge")); return@webSocket
                 }
 
-                val payload   = challengeJson["payload"]?.jsonObject
-                val nonce     = payload?.get("nonce")?.jsonPrimitive?.content ?: UUID.randomUUID().toString()
-                val timestamp = payload?.get("ts")?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
+                val pl        = challengeJson["payload"]?.jsonObject
+                val nonce     = pl?.get("nonce")?.jsonPrimitive?.content ?: UUID.randomUUID().toString()
+                val timestamp = pl?.get("ts")?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
 
-                // 2. Firmar con raw private key P-256
+                // 2. Firmar -> P1363 -> Base64url
                 val signature = signWithRawKey(privateKeyB64url, deviceId, nonce, timestamp)
 
-                val connectMessage = buildJsonObject {
+                val msg = buildJsonObject {
                     put("type", "req")
                     put("id", UUID.randomUUID().toString())
                     put("method", "connect")
@@ -146,11 +161,8 @@ class WebSocketManager(private val baseUrl: String) {
                         }
                         put("role", "operator")
                         putJsonArray("scopes") {
-                            add("operator.read")
-                            add("operator.write")
-                            add("operator.admin")
-                            add("operator.approvals")
-                            add("operator.pairing")
+                            add("operator.read"); add("operator.write"); add("operator.admin")
+                            add("operator.approvals"); add("operator.pairing")
                         }
                         putJsonArray("caps") { add("tool-events") }
                         putJsonArray("commands") { }
@@ -168,19 +180,15 @@ class WebSocketManager(private val baseUrl: String) {
                     }
                 }.toString()
 
-                AppLogger.i("WebSocketManager", "Sending connect | deviceId=${deviceId.take(16)}...")
-                send(Frame.Text(connectMessage))
+                AppLogger.i("WebSocketManager", "Sending connect (P1363 signature)")
+                send(Frame.Text(msg))
 
                 // 3. Eventos
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
                     val text = frame.readText()
                     AppLogger.d("WebSocketManager", "Received: ${text.take(300)}")
-
-                    val json = try {
-                        Json.parseToJsonElement(text).jsonObject
-                    } catch (e: Exception) { continue }
-
+                    val json = try { Json.parseToJsonElement(text).jsonObject } catch (e: Exception) { continue }
                     when (json["type"]?.jsonPrimitive?.content) {
                         "res" -> {
                             if (json["ok"]?.jsonPrimitive?.boolean == true) {
@@ -188,12 +196,11 @@ class WebSocketManager(private val baseUrl: String) {
                                 AppLogger.i("WebSocketManager", "WS Connected!")
                             } else {
                                 val error = json["error"]?.jsonObject
-                                val msg = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
-                                val code = error?.get("details")?.jsonObject
-                                    ?.get("code")?.jsonPrimitive?.content
+                                val errMsg  = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
+                                val code  = error?.get("details")?.jsonObject?.get("code")?.jsonPrimitive?.content
                                     ?: error?.get("code")?.jsonPrimitive?.content
-                                AppLogger.e("WebSocketManager", "Connect failed — code=$code msg=$msg")
-                                _connectionState.emit(ConnectionState.Error(msg))
+                                AppLogger.e("WebSocketManager", "Connect failed — code=$code msg=$errMsg")
+                                _connectionState.emit(ConnectionState.Error(errMsg))
                                 return@webSocket
                             }
                         }

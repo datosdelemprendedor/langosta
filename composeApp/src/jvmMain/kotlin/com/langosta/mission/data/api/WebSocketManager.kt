@@ -4,6 +4,7 @@ import com.langosta.mission.util.AppLogger
 import com.langosta.mission.util.ConfigManager
 import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
+import io.ktor.client.request.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -16,10 +17,12 @@ import java.util.UUID
  *
  * Protocolo (issue #4):
  *  1. Servidor envía: { event: "connect.challenge", payload: { nonce, ts } }
- *  2. Cliente responde: { type: "req", method: "connect", params: { auth: { token }, client: { id: "openclaw-control-ui", ... } } }
+ *  2. Cliente responde: { type: "req", method: "connect", params: { auth: { token }, client: { id: "openclaw-control-ui" } } }
  *  3. Servidor responde: { type: "res", ok: true }
  *
- * IMPORTANTE: client.id DEBE ser "openclaw-control-ui" (valor constante que el servidor valida).
+ * Validaciones del servidor:
+ *  - client.id DEBE ser "openclaw-control-ui"
+ *  - Header Origin DEBE ser http://<host>:<port> (el servidor valida allowedOrigins)
  */
 class WebSocketManager(private val baseUrl: String) {
 
@@ -50,14 +53,25 @@ class WebSocketManager(private val baseUrl: String) {
         }
 
         val token = ConfigManager.getAuthToken()
-        val host = baseUrl.substringBefore(":")
-        val port = baseUrl.substringAfter(":").toIntOrNull() ?: 18789
+        val serverUrl = ConfigManager.getServerUrl() // ej: http://127.0.0.1:18789
+        val host = serverUrl.removePrefix("http://").removePrefix("https://").substringBefore(":")
+        val port = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
+        // El Origin debe coincidir con la URL del gateway (como lo haría el browser)
+        val origin = "http://$host:$port"
 
-        AppLogger.i("WebSocketManager", "Connecting to $host:$port")
+        AppLogger.i("WebSocketManager", "Connecting to $host:$port (Origin: $origin)")
 
         try {
             _connectionState.emit(ConnectionState.Connecting)
-            client.webSocket(host = host, port = port, path = path) {
+            client.webSocket(
+                host = host,
+                port = port,
+                path = path,
+                request = {
+                    header("Origin", origin)
+                    header("Host", "$host:$port")
+                }
+            ) {
                 // 1. Recibir challenge
                 val challengeFrame = incoming.receive()
                 if (challengeFrame !is Frame.Text) {
@@ -71,7 +85,7 @@ class WebSocketManager(private val baseUrl: String) {
                     return@webSocket
                 }
 
-                // 2. Responder con connect — client.id debe ser "openclaw-control-ui" (constante del servidor)
+                // 2. Responder con connect
                 val connectMessage = buildJsonObject {
                     put("type", "req")
                     put("id", UUID.randomUUID().toString())
@@ -80,7 +94,7 @@ class WebSocketManager(private val baseUrl: String) {
                         put("minProtocol", 3)
                         put("maxProtocol", 3)
                         putJsonObject("client") {
-                            put("id", "openclaw-control-ui")  // valor constante requerido por el servidor
+                            put("id", "openclaw-control-ui")  // constante requerida
                             put("platform", "Win32")
                             put("mode", "webchat")
                             put("version", "control-ui")
@@ -104,10 +118,10 @@ class WebSocketManager(private val baseUrl: String) {
                     }
                 }.toString()
 
-                AppLogger.i("WebSocketManager", "Sending connect (client.id=openclaw-control-ui, no device auth)")
+                AppLogger.i("WebSocketManager", "Sending connect")
                 send(Frame.Text(connectMessage))
 
-                // 3. Procesar respuestas
+                // 3. Procesar respuestas y eventos
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
                     val text = frame.readText()
@@ -134,7 +148,7 @@ class WebSocketManager(private val baseUrl: String) {
                                 when (code) {
                                     "DEVICE_AUTH_REQUIRED",
                                     "DEVICE_AUTH_DEVICE_ID_MISMATCH" -> {
-                                        AppLogger.w("WebSocketManager", "Device auth required — implement keypair ECDSA (issue #4 Opción B)")
+                                        AppLogger.w("WebSocketManager", "Device auth required — implementar keypair ECDSA (issue #4 Opción B)")
                                         wsDisabled = true
                                     }
                                 }

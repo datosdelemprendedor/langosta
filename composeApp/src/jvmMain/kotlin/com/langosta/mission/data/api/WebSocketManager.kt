@@ -10,23 +10,34 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.*
+import org.bouncycastle.jce.ECNamedCurveTable
+import org.bouncycastle.jce.provider.BouncyCastleProvider
+import org.bouncycastle.jce.spec.ECNamedCurveSpec
+import java.math.BigInteger
 import java.security.KeyFactory
-import java.security.KeyPairGenerator
-import java.security.MessageDigest
+import java.security.Security
 import java.security.Signature
-import java.security.spec.ECGenParameterSpec
-import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.ECPrivateKeySpec
 import java.util.Base64
 import java.util.UUID
 
 /**
  * Gestiona la conexion WebSocket al gateway OpenClaw.
  *
- * Device identity (issue #4):
- *  - Prioritario: reutilizar el device ya pareado en ~/.openclaw/devices/paired.json
- *  - Fallback: generar keypair ECDSA P-256 nuevo (requiere aprobacion en el gateway)
+ * Device identity: reutiliza el keypair del browser (raw Base64url P-256)
+ * leido desde ~/.openclaw/device-identity.json.
+ *
+ * La private key del browser es un scalar raw de 32 bytes (no PKCS8).
+ * Se reconstruye via BouncyCastle -> ECPrivateKeySpec.
  */
 class WebSocketManager(private val baseUrl: String) {
+
+    init {
+        // Registrar BouncyCastle si no esta registrado
+        if (Security.getProvider("BC") == null) {
+            Security.addProvider(BouncyCastleProvider())
+        }
+    }
 
     private val client = HttpClient {
         install(WebSockets)
@@ -38,8 +49,6 @@ class WebSocketManager(private val baseUrl: String) {
     private val _connectionState = MutableSharedFlow<ConnectionState>()
     val connectionState = _connectionState.asSharedFlow()
 
-    private var wsDisabled: Boolean = false
-
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
         object Connecting : ConnectionState()
@@ -48,72 +57,48 @@ class WebSocketManager(private val baseUrl: String) {
     }
 
     /**
-     * Firma el payload con la private key del device pareado (PKCS8 Base64)
-     * o con un keypair generado en memoria si no hay device pareado.
+     * Construye la firma ECDSA usando la raw private key del browser.
+     * La key es Base64url sin padding (32 bytes = scalar D de la curva P-256).
      */
-    private fun buildDeviceIdentity(nonce: String, timestamp: Long): Triple<String, String, String> {
-        // Intentar usar el device pareado
-        if (ConfigManager.hasPairedDevice()) {
-            val deviceId = ConfigManager.getPairedDeviceId()
-            val privKeyB64 = ConfigManager.getPairedPrivateKey()
-            val pubKeyB64 = ConfigManager.getPairedPublicKey()
+    private fun signWithRawKey(privateKeyB64url: String, deviceId: String, nonce: String, timestamp: Long): String {
+        // Base64url -> bytes (agregar padding si falta)
+        val padded = privateKeyB64url
+            .replace('-', '+').replace('_', '/')
+            .let { it + "=".repeat((4 - it.length % 4) % 4) }
+        val rawBytes = Base64.getDecoder().decode(padded)
 
-            return try {
-                val privKeyBytes = Base64.getDecoder().decode(privKeyB64)
-                val privKey = KeyFactory.getInstance("EC")
-                    .generatePrivate(PKCS8EncodedKeySpec(privKeyBytes))
+        // Reconstruir ECPrivateKey desde scalar raw via BouncyCastle
+        val curveParams = ECNamedCurveTable.getParameterSpec("secp256r1")
+        val curveSpec = ECNamedCurveSpec("secp256r1", curveParams.curve, curveParams.g, curveParams.n)
+        val privKeySpec = ECPrivateKeySpec(BigInteger(1, rawBytes), curveSpec)
+        val privKey = KeyFactory.getInstance("EC", "BC").generatePrivate(privKeySpec)
 
-                val payload = "v3:$deviceId:$nonce:$timestamp"
-                val sig = Signature.getInstance("SHA256withECDSA")
-                sig.initSign(privKey)
-                sig.update(payload.toByteArray(Charsets.UTF_8))
-                val signature = Base64.getEncoder().encodeToString(sig.sign())
-
-                AppLogger.i("WebSocketManager", "Usando device pareado: id=$deviceId")
-                Triple(deviceId, pubKeyB64, signature)
-            } catch (e: Exception) {
-                AppLogger.w("WebSocketManager", "Error usando paired key: ${e.message} — generando keypair nuevo")
-                generateFreshIdentity(nonce, timestamp)
-            }
-        }
-
-        AppLogger.w("WebSocketManager", "No hay device pareado, generando keypair nuevo (requiere aprobacion)")
-        return generateFreshIdentity(nonce, timestamp)
-    }
-
-    private fun generateFreshIdentity(nonce: String, timestamp: Long): Triple<String, String, String> {
-        val kp = KeyPairGenerator.getInstance("EC").apply {
-            initialize(ECGenParameterSpec("secp256r1"))
-        }.generateKeyPair()
-
-        val pubBytes = kp.public.encoded
-        val deviceId = MessageDigest.getInstance("SHA-256").digest(pubBytes)
-            .joinToString("") { "%02x".format(it) }.take(16)
-        val pubKeyB64 = Base64.getEncoder().encodeToString(pubBytes)
-
+        // Firmar payload
         val payload = "v3:$deviceId:$nonce:$timestamp"
-        val sig = Signature.getInstance("SHA256withECDSA")
-        sig.initSign(kp.private)
+        val sig = Signature.getInstance("SHA256withECDSA", "BC")
+        sig.initSign(privKey)
         sig.update(payload.toByteArray(Charsets.UTF_8))
-        val signature = Base64.getEncoder().encodeToString(sig.sign())
-
-        return Triple(deviceId, pubKeyB64, signature)
+        return Base64.getEncoder().encodeToString(sig.sign())
     }
 
     suspend fun connectWithRetry(path: String = "") {
-        if (wsDisabled) {
-            AppLogger.w("WebSocketManager", "WebSocket disabled")
-            _connectionState.emit(ConnectionState.Disconnected)
-            return
-        }
-
         val token = ConfigManager.getAuthToken()
         val serverUrl = ConfigManager.getServerUrl()
         val host = serverUrl.removePrefix("http://").removePrefix("https://").substringBefore(":")
         val port = serverUrl.substringAfterLast(":").toIntOrNull() ?: 18789
         val origin = "http://$host:$port"
 
-        AppLogger.i("WebSocketManager", "Connecting to $host:$port")
+        if (!ConfigManager.hasPairedDevice()) {
+            AppLogger.e("WebSocketManager", "No hay device identity. Crea ~/.openclaw/device-identity.json")
+            _connectionState.emit(ConnectionState.Error("device-identity.json no encontrado"))
+            return
+        }
+
+        val deviceId  = ConfigManager.getPairedDeviceId()
+        val publicKey = ConfigManager.getPairedPublicKey()
+        val privateKeyB64url = ConfigManager.getPairedPrivateKey()
+
+        AppLogger.i("WebSocketManager", "Connecting | deviceId=${deviceId.take(16)}...")
 
         try {
             _connectionState.emit(ConnectionState.Connecting)
@@ -126,7 +111,7 @@ class WebSocketManager(private val baseUrl: String) {
                     header("Host", "$host:$port")
                 }
             ) {
-                // 1. Recibir challenge
+                // 1. Challenge
                 val challengeFrame = incoming.receive()
                 if (challengeFrame !is Frame.Text) {
                     _connectionState.emit(ConnectionState.Error("Expected text frame"))
@@ -138,12 +123,12 @@ class WebSocketManager(private val baseUrl: String) {
                     return@webSocket
                 }
 
-                val payload = challengeJson["payload"]?.jsonObject
-                val nonce = payload?.get("nonce")?.jsonPrimitive?.content ?: UUID.randomUUID().toString()
+                val payload   = challengeJson["payload"]?.jsonObject
+                val nonce     = payload?.get("nonce")?.jsonPrimitive?.content ?: UUID.randomUUID().toString()
                 val timestamp = payload?.get("ts")?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
 
-                // 2. Construir device identity y firmar
-                val (deviceId, publicKey, signature) = buildDeviceIdentity(nonce, timestamp)
+                // 2. Firmar con raw private key P-256
+                val signature = signWithRawKey(privateKeyB64url, deviceId, nonce, timestamp)
 
                 val connectMessage = buildJsonObject {
                     put("type", "req")
@@ -183,10 +168,10 @@ class WebSocketManager(private val baseUrl: String) {
                     }
                 }.toString()
 
-                AppLogger.i("WebSocketManager", "Sending connect | deviceId=$deviceId")
+                AppLogger.i("WebSocketManager", "Sending connect | deviceId=${deviceId.take(16)}...")
                 send(Frame.Text(connectMessage))
 
-                // 3. Procesar respuestas y eventos
+                // 3. Eventos
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
                     val text = frame.readText()
@@ -203,12 +188,12 @@ class WebSocketManager(private val baseUrl: String) {
                                 AppLogger.i("WebSocketManager", "WS Connected!")
                             } else {
                                 val error = json["error"]?.jsonObject
-                                val message = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
+                                val msg = error?.get("message")?.jsonPrimitive?.content ?: "Unknown"
                                 val code = error?.get("details")?.jsonObject
                                     ?.get("code")?.jsonPrimitive?.content
                                     ?: error?.get("code")?.jsonPrimitive?.content
-                                AppLogger.e("WebSocketManager", "Connect failed — code=$code message=$message")
-                                _connectionState.emit(ConnectionState.Error(message))
+                                AppLogger.e("WebSocketManager", "Connect failed — code=$code msg=$msg")
+                                _connectionState.emit(ConnectionState.Error(msg))
                                 return@webSocket
                             }
                         }

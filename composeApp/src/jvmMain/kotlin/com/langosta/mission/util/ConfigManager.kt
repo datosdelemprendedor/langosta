@@ -17,7 +17,6 @@ object ConfigManager {
     fun getAuthToken(): String = get("api_token", "")
     fun isDebugMode(): Boolean = get("debug", "true").toBoolean()
 
-    // Device identity cargada desde paired.json
     fun getPairedDeviceId(): String = get("device_id", "")
     fun getPairedPrivateKey(): String = get("device_private_key", "")
     fun getPairedPublicKey(): String = get("device_public_key", "")
@@ -25,7 +24,7 @@ object ConfigManager {
 
     fun loadDefaults() {
         loadFromOpenClawJson()
-        loadFromPairedDevices()
+        loadFromDeviceIdentity()   // ~/.openclaw/device-identity.json (exportado del browser)
         set("debug", "true")
         set("app_name", "OpenCLAW Mission Control")
     }
@@ -42,50 +41,34 @@ object ConfigManager {
     }
 
     /**
-     * Lee ~/.openclaw/devices/paired.json y extrae el primer device pareado.
-     * Estructura esperada: array de objetos con { id, privateKey, publicKey, ... }
+     * Lee ~/.openclaw/device-identity.json.
+     * Estructura (exportada del localStorage del browser):
+     * {
+     *   "deviceId": "<hex64>",
+     *   "publicKey": "<base64url raw 32 bytes P-256>",
+     *   "privateKey": "<base64url raw 32 bytes P-256>"
+     * }
      */
-    private fun loadFromPairedDevices() {
-        val raw = readFileDirect("~/.openclaw/devices/paired.json")
-            ?: readFileViaWsl("~/.openclaw/devices/paired.json")
+    private fun loadFromDeviceIdentity() {
+        val raw = readFileDirect("~/.openclaw/device-identity.json")
+            ?: readFileViaWsl("~/.openclaw/device-identity.json")
         if (raw == null) {
-            AppLogger.w("ConfigManager", "paired.json no encontrado")
+            AppLogger.w("ConfigManager", "device-identity.json no encontrado")
             return
         }
         try {
-            val json = Json.parseToJsonElement(raw)
-            // El archivo puede ser un array o un objeto con campo "devices"
-            val devicesArray: JsonArray? = when {
-                json is JsonArray -> json
-                json is JsonObject -> json["devices"]?.jsonArray
-                    ?: json["paired"]?.jsonArray
-                else -> null
-            }
+            val json = Json.parseToJsonElement(raw).jsonObject
+            val deviceId   = json["deviceId"]?.jsonPrimitive?.content
+            val publicKey  = json["publicKey"]?.jsonPrimitive?.content
+            val privateKey = json["privateKey"]?.jsonPrimitive?.content
 
-            val first = devicesArray?.firstOrNull()?.jsonObject
-                ?: (json as? JsonObject)  // si es un objeto unico
-
-            if (first == null) {
-                AppLogger.w("ConfigManager", "paired.json: no se encontro ningun device")
-                return
-            }
-
-            val deviceId = first["id"]?.jsonPrimitive?.content
-                ?: first["deviceId"]?.jsonPrimitive?.content
-            val privateKey = first["privateKey"]?.jsonPrimitive?.content
-                ?: first["private_key"]?.jsonPrimitive?.content
-                ?: first["privKey"]?.jsonPrimitive?.content
-            val publicKey = first["publicKey"]?.jsonPrimitive?.content
-                ?: first["public_key"]?.jsonPrimitive?.content
-                ?: first["pubKey"]?.jsonPrimitive?.content
-
-            if (!deviceId.isNullOrEmpty()) set("device_id", deviceId)
+            if (!deviceId.isNullOrEmpty())   set("device_id", deviceId)
+            if (!publicKey.isNullOrEmpty())  set("device_public_key", publicKey)
             if (!privateKey.isNullOrEmpty()) set("device_private_key", privateKey)
-            if (!publicKey.isNullOrEmpty()) set("device_public_key", publicKey)
 
-            AppLogger.i("ConfigManager", "Device pareado cargado: id=$deviceId hasPrivKey=${!privateKey.isNullOrEmpty()}")
+            AppLogger.i("ConfigManager", "Device identity cargado: id=${deviceId?.take(16)}... hasPrivKey=${!privateKey.isNullOrEmpty()}")
         } catch (e: Exception) {
-            AppLogger.w("ConfigManager", "Error parseando paired.json: ${e.message}")
+            AppLogger.w("ConfigManager", "Error parseando device-identity.json: ${e.message}")
         }
     }
 

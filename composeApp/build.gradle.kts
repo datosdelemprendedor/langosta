@@ -34,6 +34,8 @@ kotlin {
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.kotlinx.serialization.json)
             implementation("org.xerial:sqlite-jdbc:3.45.3.0")
+            // BouncyCastle: reconstruir EC private key raw (32 bytes) del browser
+            implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
         }
     }
 }

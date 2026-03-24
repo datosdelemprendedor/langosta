@@ -16,7 +16,8 @@ data class GatewayStatus(
     val status: String,
     val mode: String,
     val version: String? = null,
-    val uptime: Long? = null
+    val uptime: Long? = null,
+    val latencyMs: Int? = null
 )
 
 @Serializable
@@ -31,10 +32,11 @@ data class AgentNode(
     val name: String,
     val type: String,
     val model: String,
-    val tokensIn: Long,
-    val tokensOut: Long,
-    val utilization: Int,
-    val lastSeen: String
+    val tokensIn: Long = 0L,
+    val tokensOut: Long = 0L,
+    val utilization: Int = 0,
+    val lastSeen: String = "unknown",
+    val status: String = "idle"
 )
 
 @Serializable

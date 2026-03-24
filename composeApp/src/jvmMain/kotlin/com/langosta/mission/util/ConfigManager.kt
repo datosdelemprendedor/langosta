@@ -1,7 +1,9 @@
 package com.langosta.mission.util
 
 import kotlinx.serialization.json.*
-import java.io.File
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 object ConfigManager {
 
@@ -26,24 +28,23 @@ object ConfigManager {
     }
 
     /**
-     * Lee ~/.openclaw/openclaw.json y extrae:
+     * Lee ~/.openclaw/openclaw.json via WSL y extrae:
      * - gateway.auth.token -> api_token
      * - gateway.port       -> server_url / ws_url
      *
-     * Patron basado en paths.ts de robsannaa/openclaw-mission-control
+     * Se lee via WSL porque la app corre en Windows/JVM pero
+     * openclaw vive en el filesystem de WSL.
      */
     private fun loadFromOpenClawJson() {
         try {
-            val home = System.getProperty("user.home")
-            val configFile = File("$home/.openclaw/openclaw.json")
-            if (!configFile.exists()) {
-                AppLogger.w("ConfigManager", "openclaw.json not found at ${configFile.absolutePath}")
-                set("server_url", "http://127.0.0.1:18789")
-                set("ws_url", "127.0.0.1:18789")
+            val raw = readFileViaWsl("~/.openclaw/openclaw.json")
+            if (raw == null) {
+                AppLogger.w("ConfigManager", "openclaw.json not found in WSL")
+                setDefaults()
                 return
             }
 
-            val json = Json.parseToJsonElement(configFile.readText()).jsonObject
+            val json = Json.parseToJsonElement(raw).jsonObject
 
             // Token: gateway.auth.token
             val token = json["gateway"]?.jsonObject
@@ -62,14 +63,35 @@ object ConfigManager {
                 set("ws_url", "127.0.0.1:$port")
                 AppLogger.i("ConfigManager", "Gateway URL -> http://127.0.0.1:$port")
             } else {
-                set("server_url", "http://127.0.0.1:18789")
-                set("ws_url", "127.0.0.1:18789")
+                setDefaults()
             }
 
         } catch (e: Exception) {
             AppLogger.w("ConfigManager", "Could not read openclaw.json: ${e.message}")
-            set("server_url", "http://127.0.0.1:18789")
-            set("ws_url", "127.0.0.1:18789")
+            setDefaults()
+        }
+    }
+
+    private fun setDefaults() {
+        set("server_url", "http://127.0.0.1:18789")
+        set("ws_url", "127.0.0.1:18789")
+    }
+
+    /** Lee un archivo del filesystem de WSL y retorna su contenido como String */
+    private fun readFileViaWsl(path: String): String? {
+        return try {
+            val process = ProcessBuilder(
+                "cmd.exe", "/c", "wsl", "-d", "Ubuntu", "-e", "bash", "-lc", "cat $path"
+            )
+                .redirectError(ProcessBuilder.Redirect.PIPE)
+                .redirectOutput(ProcessBuilder.Redirect.PIPE)
+                .start()
+            val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
+            process.waitFor(5, TimeUnit.SECONDS)
+            output.trim().ifBlank { null }
+        } catch (e: Exception) {
+            AppLogger.w("ConfigManager", "readFileViaWsl failed: ${e.message}")
+            null
         }
     }
 }
